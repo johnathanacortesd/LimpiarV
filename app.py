@@ -1,4 +1,4 @@
-# app.py
+# app.py (versión mejorada)
 
 import streamlit as st
 import pandas as pd
@@ -13,7 +13,7 @@ st.title("🚀 Depurador y Mapeador de Informes de Noticias")
 st.write("""
     Esta herramienta automatiza la limpieza de informes de noticias. Sube tus archivos para:
     1.  **Mapear Nombres de Internet**: Actualiza los nombres de los medios de tipo 'Internet'.
-    2.  **Asignar Regiones**: Añade la columna 'Región' basada en el medio.
+    2.  **Asignar Regiones**: Añade o actualiza la columna 'Región' basada en el medio.
     3.  **Detectar y Marcar Duplicados**: Aplica una lógica avanzada para encontrar noticias duplicadas.
 """)
 
@@ -57,17 +57,39 @@ if st.sidebar.button("✨ Procesar Archivos"):
                     for row in ws_region.iter_rows(min_row=2) if row[0].value
                 }
 
-                # --- Paso 3: Aplicar los Mapeos directamente con Openpyxl para preservar todo ---
+                # --- Paso 3: Aplicar los Mapeos (con creación de columna 'Región' si es necesario) ---
                 headers = [cell.value for cell in ws_main[1]]
-                # Encontrar los índices de las columnas importantes
+                
+                # Validar y obtener índices de columnas necesarias
                 try:
                     medio_idx = headers.index("Medio")
                     tipo_medio_idx = headers.index("Tipo de Medio")
-                    region_idx = headers.index("Región")
                 except ValueError as e:
                     st.error(f"Error: La columna '{e.args[0].split(' ')[0]}' no se encontró en el archivo principal. Por favor, revisa las cabeceras.")
                     st.stop()
 
+                # ---- LÓGICA MEJORADA PARA LA COLUMNA REGIÓN ----
+                if "Región" not in headers:
+                    # Si no existe, la creamos en la posición correcta
+                    try:
+                        # Buscamos la columna 'Sección - Programa' para insertar después
+                        seccion_idx = headers.index("Sección - Programa")
+                        # El índice para insertar es uno después de 'Sección - Programa' (1-based index)
+                        insert_col_idx = seccion_idx + 2 
+                        ws_main.insert_cols(insert_col_idx)
+                        ws_main.cell(row=1, column=insert_col_idx, value="Región")
+                        region_idx = insert_col_idx -1 # Convertir a 0-based index para la lista
+                        st.info("Columna 'Región' no encontrada. Se ha creado automáticamente.")
+                    except ValueError:
+                        # Si 'Sección - Programa' tampoco existe, la añadimos al final
+                        insert_col_idx = len(headers) + 1
+                        ws_main.cell(row=1, column=insert_col_idx, value="Región")
+                        region_idx = insert_col_idx - 1
+                        st.warning("Columna 'Sección - Programa' no encontrada. 'Región' se ha añadido al final.")
+                else:
+                    # Si ya existe, solo obtenemos su índice
+                    region_idx = headers.index("Región")
+                # ----------------------------------------------------
 
                 for row in ws_main.iter_rows(min_row=2):
                     # Mapeo de Internet
@@ -80,7 +102,7 @@ if st.sidebar.button("✨ Procesar Archivos"):
                     
                     # Mapeo de Región (se usa el valor ya actualizado del medio)
                     medio_actual_val = str(row[medio_idx].value).lower().strip()
-                    nueva_region = region_dict.get(medio_actual_val, "Error") # Default a "Error" si no se encuentra
+                    nueva_region = region_dict.get(medio_actual_val, "No Asignada") # Default más informativo
                     row[region_idx].value = nueva_region
 
                 st.info("✅ Mapeo de Internet y Regiones completado.")
@@ -117,6 +139,7 @@ if st.sidebar.button("✨ Procesar Archivos"):
             
             except Exception as e:
                 st.error(f"Ha ocurrido un error inesperado durante el procesamiento: {e}")
+                st.exception(e) # Esto imprimirá el traceback completo para facilitar la depuración
                 st.error("Por favor, verifica que los archivos tengan el formato y las columnas correctas.")
 
     else:

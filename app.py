@@ -1,15 +1,14 @@
-# app.py (versión que pasa los diccionarios al procesador correctamente)
+# app.py (versión que solo prepara y llama al motor)
 
 import streamlit as st
 import openpyxl
 import io
 import datetime
-from deduplicator import run_deduplication_process # Importa la función motor
+from deduplicator import run_deduplication_process
 
-# --- Configuración de la Página y Autenticación (sin cambios) ---
+# --- Configuración y Autenticación (Sin cambios) ---
 st.set_page_config(page_title="Intelli-Clean | Depurador IA", page_icon="🤖", layout="wide", initial_sidebar_state="expanded")
 def check_password():
-    # ... (código de contraseña idéntico) ...
     def password_entered():
         try:
             if st.session_state["password"] == st.secrets.password.password:
@@ -58,20 +57,26 @@ if check_password():
                     region_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_region_map, data_only=True).active.iter_rows(min_row=2) if r[0].value is not None}
                     empresa_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_empresa_map, data_only=True).active.iter_rows(min_row=2) if r[0].value is not None}
 
-                    status.write("🧠 Iniciando procesamiento inteligente de datos...")
+                    # Preparar la columna Región si no existe
+                    ws_main = wb_main.active
+                    headers = [cell.value for cell in ws_main[1]]
+                    if "Región" not in headers:
+                        seccion_idx = headers.index("Sección - Programa")
+                        insert_col_idx = seccion_idx + 2; ws_main.insert_cols(insert_col_idx)
+                        ws_main.cell(row=1, column=insert_col_idx, value="Región")
                     
-                    # Llamada a la función motor, pasándole todo lo que necesita
+                    status.write("🧠 Iniciando procesamiento inteligente de datos...")
                     final_wb, summary = run_deduplication_process(wb_main, internet_dict, region_dict, empresa_dict)
                     
                     status.update(label="✅ ¡Análisis completado!", state="complete", expanded=False)
                     st.subheader("📊 Resumen del Proceso")
-                    # ... (código para mostrar resultados y descargar, sin cambios) ...
                     col1, col2, col3 = st.columns(3); col1.metric("Filas Totales", summary['total_rows'])
                     col2.metric("👍 Filas para Conservar", summary['to_conserve'])
                     col3.metric("🗑️ Filas para Eliminar", summary['to_eliminate'])
                     with st.expander("Ver detalles de duplicados"):
                          st.write(f"**Duplicados exactos:** {summary['exact_duplicates']}")
                          st.write(f"**Posibles duplicados:** {summary['possible_duplicates']}")
+
                     stream = io.BytesIO(); final_wb.save(stream); stream.seek(0)
                     output_filename = f"Informe_Depurado_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
                     st.download_button("📥 Descargar Informe Final Depurado", stream, output_filename, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)

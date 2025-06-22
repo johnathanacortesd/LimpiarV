@@ -4,7 +4,6 @@ import streamlit as st
 import openpyxl
 import io
 import datetime
-import re
 from deduplicator import run_deduplication_process
 
 # --- Configuración y Autenticación ---
@@ -58,22 +57,15 @@ if check_password():
                     region_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_region_map, data_only=True).active.iter_rows(min_row=2) if r[0].value is not None}
                     empresa_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_empresa_map, data_only=True).active.iter_rows(min_row=2) if r[0].value is not None}
 
-                    status.write("🗺️ Preparando columna de Región...")
+                    # Preparar la columna Región si no existe
                     ws_main = wb_main.active
                     headers = [cell.value for cell in ws_main[1]]
-                    
-                    try:
-                        medio_idx = headers.index("Medio"); tipo_medio_idx = headers.index("Tipo de Medio")
-                    except ValueError as e:
-                        st.error(f"Error Crítico: La columna '{e.args[0].split(' ')[0]}' no se encontró."); st.stop()
-                    
                     if "Región" not in headers:
                         try: seccion_idx = headers.index("Sección - Programa"); insert_col_idx = seccion_idx + 2
                         except ValueError: insert_col_idx = len(headers) + 1
                         ws_main.insert_cols(insert_col_idx); ws_main.cell(row=1, column=insert_col_idx, value="Región")
-
+                    
                     status.write("🧠 Iniciando proceso de expansión, mapeo y deduplicación...")
-                    # Pasar todos los diccionarios al deduplicador para que maneje todo el mapeo
                     final_wb, summary = run_deduplication_process(wb_main, empresa_dict, internet_dict, region_dict)
                     
                     status.update(label="✅ ¡Análisis completado!", state="complete", expanded=True)
@@ -81,9 +73,9 @@ if check_password():
                     col1, col2, col3 = st.columns(3); col1.metric("Filas Totales", summary['total_rows'])
                     col2.metric("👍 Filas para Conservar", summary['to_conserve'])
                     col3.metric("🗑️ Filas para Eliminar", summary['to_eliminate'])
-                    with st.expander("Ver detalles de duplicados"):
-                         st.write(f"**Duplicados exactos:** {summary['exact_duplicates']}")
-                         st.write(f"**Posibles duplicados:** {summary['possible_duplicates']}")
+                    
+                    st.write(f"**Duplicados exactos identificados:** {summary['exact_duplicates']}")
+                    st.write(f"**Posibles duplicados identificados:** {summary['possible_duplicates']}")
 
                     stream = io.BytesIO(); final_wb.save(stream); stream.seek(0)
                     output_filename = f"Informe_Depurado_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"

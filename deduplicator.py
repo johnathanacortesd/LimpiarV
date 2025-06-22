@@ -362,6 +362,10 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
                     if pos > 0 and processed_rows[idx]['Mantener'] != "Eliminar":
                         mark_as_duplicate_to_delete(processed_rows[idx])
 
+# Modificación en deduplicator.py
+# Reemplaza la sección "FASE 7: GENERACIÓN DEL REPORTE FINAL" 
+# desde donde dice "# Ordenar filas por índice original para mantener el orden"
+
     # --- FASE 7: GENERACIÓN DEL REPORTE FINAL ---
     final_order = [
         "ID Noticia", "Fecha", "Hora", "Medio", "Tipo de Medio", "Sección - Programa", "Región",
@@ -379,8 +383,18 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
     if "CustomLink" not in new_wb.named_styles: 
         new_wb.add_named_style(custom_link_style)
 
-    # Ordenar filas por índice original para mantener el orden
-    processed_rows.sort(key=lambda r: r.get('original_row_index', 0))
+    # NUEVO: Ordenar filas alfabéticamente por Título y luego por Medio
+    titulo_key = norm_key('Título')
+    medio_key = norm_key('Medio')
+    
+    def get_sort_key(row_data):
+        # Obtener título y medio para ordenamiento, usando cadenas vacías si no existen
+        titulo = str(row_data.get(titulo_key, '')).strip().lower()
+        medio = str(row_data.get(medio_key, '')).strip().lower()
+        return (titulo, medio)
+    
+    # Ordenar las filas procesadas alfabéticamente
+    processed_rows.sort(key=get_sort_key)
 
     # Aplicar limpieza final de títulos solo para filas que se conservan
     for row_data in processed_rows:
@@ -426,6 +440,74 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
                 cell.value = "Link"
                 cell.style = "CustomLink"
     
+    # NUEVO: Aplicar ordenamiento automático en Excel (equivalente a ordenar manualmente)
+    # Esto ordena directamente las filas en el sheet como si lo hicieras en Excel
+    
+    # Obtener el rango de datos (excluyendo encabezados)
+    max_row = new_sheet.max_row
+    max_col = new_sheet.max_column
+    
+    if max_row > 1:  # Solo si hay datos además de encabezados
+        # Obtener índices de las columnas Título y Medio
+        titulo_col_idx = final_order.index("Título") + 1  # +1 porque Excel usa índice base 1
+        medio_col_idx = final_order.index("Medio") + 1
+        
+        # Convertir datos a lista para ordenar
+        data_rows = []
+        for row in new_sheet.iter_rows(min_row=2, max_row=max_row, values_only=True):
+            data_rows.append(list(row))
+        
+        # Ordenar: primero por Título, luego por Medio (ambos alfabéticamente)
+        data_rows.sort(key=lambda row: (
+            str(row[titulo_col_idx - 1] or '').lower(),  # -1 porque la lista usa índice base 0
+            str(row[medio_col_idx - 1] or '').lower()
+        ))
+        
+        # Limpiar las filas existentes (mantener solo encabezados)
+        for row_num in range(max_row, 1, -1):
+            new_sheet.delete_rows(row_num)
+        
+        # Volver a insertar las filas ordenadas
+        for row_data in data_rows:
+            new_sheet.append(row_data)
+        
+        # Recrear los hipervínculos después del reordenamiento
+        link_nota_idx = final_order.index("Link Nota")
+        link_streaming_idx = final_order.index("Link (Streaming - Imagen)")
+        
+        # Crear un mapeo de filas ordenadas a datos procesados originales
+        row_to_processed = {}
+        for i, row_data in enumerate(data_rows):
+            # Buscar la fila procesada correspondiente usando criterios únicos
+            titulo_val = row_data[titulo_col_idx - 1]
+            medio_val = row_data[medio_col_idx - 1]
+            fecha_val = row_data[final_order.index("Fecha")]
+            
+            for processed in processed_rows:
+                if (str(processed.get(norm_key('Título'), '')).strip() == str(titulo_val or '').strip() and
+                    str(processed.get(norm_key('Medio'), '')).strip() == str(medio_val or '').strip() and
+                    str(processed.get(norm_key('Fecha'), '')) == str(fecha_val or '')):
+                    row_to_processed[i + 2] = processed  # +2 porque empezamos en fila 2
+                    break
+        
+        # Aplicar hipervínculos a las filas reordenadas
+        for row_num, processed in row_to_processed.items():
+            # Link Nota
+            link_data = processed.get(norm_key("Link Nota"))
+            if link_data and isinstance(link_data, dict) and link_data.get("url"):
+                cell = new_sheet.cell(row=row_num, column=link_nota_idx + 1)
+                cell.hyperlink = link_data["url"]
+                cell.value = "Link"
+                cell.style = "CustomLink"
+            
+            # Link Streaming
+            link_data_stream = processed.get(norm_key("Link (Streaming - Imagen)"))
+            if link_data_stream and isinstance(link_data_stream, dict) and link_data_stream.get("url"):
+                cell = new_sheet.cell(row=row_num, column=link_streaming_idx + 1)
+                cell.hyperlink = link_data_stream["url"]
+                cell.value = "Link"
+                cell.style = "CustomLink"
+
     # Eliminar la hoja original
     if wb.active in wb.worksheets:
         wb.remove(wb.active)

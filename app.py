@@ -1,54 +1,27 @@
-# app.py (versión final con la lógica original restaurada y el nuevo mapeo añadido correctamente)
+# app.py (versión que pasa los diccionarios al procesador correctamente)
 
 import streamlit as st
 import openpyxl
 import io
 import datetime
-import re
-from deduplicator import run_deduplication_process
+from deduplicator import run_deduplication_process # Importa la función motor
 
-# --- Configuración de la Página ---
-st.set_page_config(
-    page_title="Intelli-Clean | Depurador de Noticias IA",
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# --- Funciones Auxiliares para el Mapeo ---
-def get_url_from_cell(cell):
-    if cell.hyperlink:
-        return cell.hyperlink.target
-    if cell.value and isinstance(cell.value, str):
-        match = re.search(r'=HYPERLINK\("([^"]+)"', cell.value)
-        if match:
-            return match.group(1)
-    return None
-
-def extract_root_domain(url):
-    if not url: return None
-    try:
-        cleaned_url = re.sub(r'^https?://', '', url).lower().replace('www.', '')
-        domain = cleaned_url.split('/')[0]
-        return domain.capitalize()
-    except Exception:
-        return None
-
-# --- LÓGICA DE AUTENTICACIÓN (Sin cambios) ---
+# --- Configuración de la Página y Autenticación (sin cambios) ---
+st.set_page_config(page_title="Intelli-Clean | Depurador IA", page_icon="🤖", layout="wide", initial_sidebar_state="expanded")
 def check_password():
+    # ... (código de contraseña idéntico) ...
     def password_entered():
         try:
             if st.session_state["password"] == st.secrets.password.password:
                 st.session_state["password_correct"] = True; del st.session_state["password"]
             else: st.session_state["password_correct"] = False
         except (AttributeError, KeyError): st.session_state["password_correct"] = False
-    
     try: _ = st.secrets.password.password
     except (AttributeError, KeyError):
         st.error("🚨 ¡Error de configuración! Contraseña no definida en 'Secrets'."); return False
     if "password_correct" not in st.session_state: st.session_state["password_correct"] = False
     if not st.session_state["password_correct"]:
-        c1, c2, c3 = st.columns([1, 1, 1])
+        c1, c2, c3 = st.columns([1, 1, 1]);
         with c2:
             st.markdown("<h1 style='text-align: center;'>🤖</h1>", unsafe_allow_html=True)
             st.markdown("<h3 style='text-align: center;'>Intelli-Clean Access</h3>", unsafe_allow_html=True)
@@ -70,7 +43,6 @@ if check_password():
         uploaded_internet_map = st.file_uploader("2. Mapeo de Medios de Internet", type="xlsx")
         uploaded_region_map = st.file_uploader("3. Mapeo de Regiones", type="xlsx")
         uploaded_empresa_map = st.file_uploader("4. Mapeo de Nombres de Empresas", type="xlsx")
-        
         st.divider()
         process_button = st.button("🚀 Analizar y Depurar Archivos", type="primary", use_container_width=True)
 
@@ -82,66 +54,24 @@ if check_password():
                 try:
                     status.write("Cargando archivos y creando diccionarios de mapeo...")
                     wb_main = openpyxl.load_workbook(uploaded_main_file)
-                    ws_main = wb_main.active
                     internet_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_internet_map, data_only=True).active.iter_rows(min_row=2) if r[0].value is not None}
                     region_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_region_map, data_only=True).active.iter_rows(min_row=2) if r[0].value is not None}
                     empresa_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_empresa_map, data_only=True).active.iter_rows(min_row=2) if r[0].value is not None}
 
-                    status.write("🗺️ Aplicando mapeos inteligentes...")
-                    headers = [cell.value for cell in ws_main[1]]
-                    try:
-                        medio_idx, tipo_medio_idx, empresa_idx, link_nota_idx = (
-                            headers.index("Medio"), headers.index("Tipo de Medio"),
-                            headers.index("Menciones - Empresa"), headers.index("Link Nota")
-                        )
-                    except ValueError as e:
-                        st.error(f"Error Crítico: La columna '{e.args[0].split(' ')[0]}' no se encontró."); st.stop()
-
-                    if "Región" not in headers:
-                        seccion_idx = headers.index("Sección - Programa")
-                        insert_col_idx = seccion_idx + 2; ws_main.insert_cols(insert_col_idx)
-                        ws_main.cell(row=1, column=insert_col_idx, value="Región"); region_idx = insert_col_idx - 1
-                    else: region_idx = headers.index("Región")
+                    status.write("🧠 Iniciando procesamiento inteligente de datos...")
                     
-                    for row in ws_main.iter_rows(min_row=2):
-                        # 1. Mapeo de Empresas (Nuevo y aislado)
-                        if row[empresa_idx].value:
-                            empresa_val = str(row[empresa_idx].value).lower().strip()
-                            nuevo_nombre_empresa = empresa_dict.get(empresa_val)
-                            if nuevo_nombre_empresa is not None:
-                                row[empresa_idx].value = nuevo_nombre_empresa
-                        
-                        # 2. Mapeo de Internet (Lógica original y correcta restaurada)
-                        if str(row[tipo_medio_idx].value).lower().strip() == 'internet':
-                            medio_val = str(row[medio_idx].value).lower().strip()
-                            nuevo_medio = internet_dict.get(medio_val)
-                            
-                            if nuevo_medio is not None:
-                                # Prioridad 1: Usar el valor del diccionario, incluso si es una cadena vacía.
-                                row[medio_idx].value = nuevo_medio
-                            else:
-                                # Prioridad 2 (Plan B): Si el medio NO ESTÁ en el diccionario, usar la URL.
-                                url = get_url_from_cell(row[link_nota_idx])
-                                if root_domain := extract_root_domain(url):
-                                    row[medio_idx].value = root_domain
-                        
-                        # 3. Mapeo de Región (Siempre se ejecuta después de que el Medio ya fue modificado)
-                        medio_actual_val = str(row[medio_idx].value).lower().strip()
-                        # Usa "Online" como valor por defecto si no se encuentra el medio.
-                        row[region_idx].value = region_dict.get(medio_actual_val, "Online")
-                    
-                    status.write("🧠 Iniciando detección inteligente de duplicados...")
-                    final_wb, summary = run_deduplication_process(wb_main)
+                    # Llamada a la función motor, pasándole todo lo que necesita
+                    final_wb, summary = run_deduplication_process(wb_main, internet_dict, region_dict, empresa_dict)
                     
                     status.update(label="✅ ¡Análisis completado!", state="complete", expanded=False)
                     st.subheader("📊 Resumen del Proceso")
+                    # ... (código para mostrar resultados y descargar, sin cambios) ...
                     col1, col2, col3 = st.columns(3); col1.metric("Filas Totales", summary['total_rows'])
                     col2.metric("👍 Filas para Conservar", summary['to_conserve'])
                     col3.metric("🗑️ Filas para Eliminar", summary['to_eliminate'])
                     with st.expander("Ver detalles de duplicados"):
                          st.write(f"**Duplicados exactos:** {summary['exact_duplicates']}")
                          st.write(f"**Posibles duplicados:** {summary['possible_duplicates']}")
-
                     stream = io.BytesIO(); final_wb.save(stream); stream.seek(0)
                     output_filename = f"Informe_Depurado_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
                     st.download_button("📥 Descargar Informe Final Depurado", stream, output_filename, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)

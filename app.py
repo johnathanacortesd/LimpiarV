@@ -1,4 +1,4 @@
-# app.py (versión final con lógica de mapeo de Internet corregida y robusta)
+# app.py (versión final con la lógica original restaurada y el nuevo mapeo añadido correctamente)
 
 import streamlit as st
 import openpyxl
@@ -34,7 +34,7 @@ def extract_root_domain(url):
     except Exception:
         return None
 
-# --- LÓGICA DE AUTENTICACIÓN ---
+# --- LÓGICA DE AUTENTICACIÓN (Sin cambios) ---
 def check_password():
     def password_entered():
         try:
@@ -83,9 +83,9 @@ if check_password():
                     status.write("Cargando archivos y creando diccionarios de mapeo...")
                     wb_main = openpyxl.load_workbook(uploaded_main_file)
                     ws_main = wb_main.active
-                    internet_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_internet_map, data_only=True).active.iter_rows(min_row=2) if r[0].value}
-                    region_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_region_map, data_only=True).active.iter_rows(min_row=2) if r[0].value}
-                    empresa_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_empresa_map, data_only=True).active.iter_rows(min_row=2) if r[0].value}
+                    internet_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_internet_map, data_only=True).active.iter_rows(min_row=2) if r[0].value is not None}
+                    region_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_region_map, data_only=True).active.iter_rows(min_row=2) if r[0].value is not None}
+                    empresa_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_empresa_map, data_only=True).active.iter_rows(min_row=2) if r[0].value is not None}
 
                     status.write("🗺️ Aplicando mapeos inteligentes...")
                     headers = [cell.value for cell in ws_main[1]]
@@ -104,28 +104,30 @@ if check_password():
                     else: region_idx = headers.index("Región")
                     
                     for row in ws_main.iter_rows(min_row=2):
-                        # 1. Mapeo de Empresas
+                        # 1. Mapeo de Empresas (Nuevo y aislado)
                         if row[empresa_idx].value:
                             empresa_val = str(row[empresa_idx].value).lower().strip()
-                            if nuevo_nombre := empresa_dict.get(empresa_val): row[empresa_idx].value = nuevo_nombre
+                            nuevo_nombre_empresa = empresa_dict.get(empresa_val)
+                            if nuevo_nombre_empresa is not None:
+                                row[empresa_idx].value = nuevo_nombre_empresa
                         
-                        # 2. Mapeo de Internet con lógica corregida
+                        # 2. Mapeo de Internet (Lógica original y correcta restaurada)
                         if str(row[tipo_medio_idx].value).lower().strip() == 'internet':
                             medio_val = str(row[medio_idx].value).lower().strip()
+                            nuevo_medio = internet_dict.get(medio_val)
                             
-                            # --- LÓGICA CORREGIDA ---
-                            # Primero, verificar si el medio existe en el diccionario de mapeo
-                            if medio_val in internet_dict:
-                                # Si existe, aplicar el mapeo y continuar.
-                                row[medio_idx].value = internet_dict[medio_val]
+                            if nuevo_medio is not None:
+                                # Prioridad 1: Usar el valor del diccionario, incluso si es una cadena vacía.
+                                row[medio_idx].value = nuevo_medio
                             else:
-                                # SOLO si no existe en el diccionario, intentar el fallback con la URL.
+                                # Prioridad 2 (Plan B): Si el medio NO ESTÁ en el diccionario, usar la URL.
                                 url = get_url_from_cell(row[link_nota_idx])
                                 if root_domain := extract_root_domain(url):
                                     row[medio_idx].value = root_domain
                         
-                        # 3. Mapeo de Región
+                        # 3. Mapeo de Región (Siempre se ejecuta después de que el Medio ya fue modificado)
                         medio_actual_val = str(row[medio_idx].value).lower().strip()
+                        # Usa "Online" como valor por defecto si no se encuentra el medio.
                         row[region_idx].value = region_dict.get(medio_actual_val, "Online")
                     
                     status.write("🧠 Iniciando detección inteligente de duplicados...")

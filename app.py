@@ -4,10 +4,10 @@ import streamlit as st
 import openpyxl
 import io
 import datetime
-import re
+# No es necesario 're' aquí
 from deduplicator import run_deduplication_process
 
-# --- Configuración y Autenticación ---
+# --- Configuración y Autenticación (sin cambios) ---
 st.set_page_config(page_title="Intelli-Clean | Depurador IA", page_icon="🤖", layout="wide", initial_sidebar_state="expanded")
 def check_password():
     def password_entered():
@@ -54,44 +54,63 @@ if check_password():
                 try:
                     status.write("Cargando archivos y creando diccionarios de mapeo...")
                     wb_main = openpyxl.load_workbook(uploaded_main_file)
-                    internet_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_internet_map, data_only=True).active.iter_rows(min_row=2) if r[0].value is not None}
-                    region_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_region_map, data_only=True).active.iter_rows(min_row=2) if r[0].value is not None}
-                    empresa_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_empresa_map, data_only=True).active.iter_rows(min_row=2) if r[0].value is not None}
-
-                    status.write("🗺️ Preparando columna de Región...")
-                    ws_main = wb_main.active
-                    headers = [cell.value for cell in ws_main[1]]
+                    # Añadida verificación para valores en diccionarios de mapeo
+                    internet_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_internet_map, data_only=True).active.iter_rows(min_row=2) if r[0].value and r[1].value}
+                    region_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_region_map, data_only=True).active.iter_rows(min_row=2) if r[0].value and r[1].value}
+                    empresa_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_empresa_map, data_only=True).active.iter_rows(min_row=2) if r[0].value and r[1].value}
                     
-                    try:
-                        medio_idx = headers.index("Medio"); tipo_medio_idx = headers.index("Tipo de Medio")
-                    except ValueError as e:
-                        st.error(f"Error Crítico: La columna '{e.args[0].split(' ')[0]}' no se encontró."); st.stop()
-                    
-                    if "Región" not in headers:
-                        try: seccion_idx = headers.index("Sección - Programa"); insert_col_idx = seccion_idx + 2
-                        except ValueError: insert_col_idx = len(headers) + 1
-                        ws_main.insert_cols(insert_col_idx); ws_main.cell(row=1, column=insert_col_idx, value="Región")
-
                     status.write("🧠 Iniciando proceso de expansión, mapeo y deduplicación...")
-                    # Pasar todos los diccionarios al deduplicador para que maneje todo el mapeo
-                    final_wb, summary = run_deduplication_process(wb_main, empresa_dict, internet_dict, region_dict)
                     
-                    status.update(label="✅ ¡Análisis completado!", state="complete", expanded=True)
+                    # <<< --- INICIO DEL CAMBIO --- >>>
+                    # Capturar los tres valores devueltos por la función
+                    final_wb, nissan_wb, summary = run_deduplication_process(wb_main, empresa_dict, internet_dict, region_dict)
+                    # <<< --- FIN DEL CAMBIO --- >>>
+                    
+                    status.update(label="✅ ¡Análisis completado!", state="complete", expanded=False)
                     st.subheader("📊 Resumen del Proceso")
-                    col1, col2, col3 = st.columns(3); col1.metric("Filas Totales", summary['total_rows'])
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Filas Totales Procesadas", summary['total_rows'])
                     col2.metric("👍 Filas para Conservar", summary['to_conserve'])
                     col3.metric("🗑️ Filas para Eliminar", summary['to_eliminate'])
                     with st.expander("Ver detalles de duplicados"):
                          st.write(f"**Duplicados exactos:** {summary['exact_duplicates']}")
                          st.write(f"**Posibles duplicados:** {summary['possible_duplicates']}")
 
-                    stream = io.BytesIO(); final_wb.save(stream); stream.seek(0)
-                    output_filename = f"Informe_Depurado_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
-                    st.download_button("📥 Descargar Informe Final Depurado", stream, output_filename, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                    st.divider()
+                    st.subheader("📥 Archivos para Descargar")
+
+                    # Botón de descarga para el informe principal
+                    main_stream = io.BytesIO()
+                    final_wb.save(main_stream)
+                    main_stream.seek(0)
+                    main_filename = f"Informe_Depurado_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+                    st.download_button(
+                        label="1. Descargar Informe Principal Depurado", 
+                        data=main_stream, 
+                        file_name=main_filename, 
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                        use_container_width=True
+                    )
                 
+                    # <<< --- INICIO DEL CAMBIO --- >>>
+                    # Botón de descarga para el informe Nissan Test
+                    nissan_stream = io.BytesIO()
+                    nissan_wb.save(nissan_stream)
+                    nissan_stream.seek(0)
+                    nissan_filename = "nissan_test.xlsx"
+                    st.download_button(
+                        label="2. Descargar Reporte 'Nissan Test' (Resumen)",
+                        data=nissan_stream,
+                        file_name=nissan_filename,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+                    # <<< --- FIN DEL CAMBIO --- >>>
+
                 except Exception as e:
                     status.update(label="❌ Error en el proceso", state="error", expanded=True)
-                    st.error(f"Ha ocurrido un error inesperado: {e}"); st.exception(e)
+                    st.error(f"Ha ocurrido un error inesperado: {e}")
+                    st.exception(e)
         else:
             st.warning("⚠️ Por favor, asegúrate de cargar los cuatro archivos requeridos en la barra lateral.")
     else:

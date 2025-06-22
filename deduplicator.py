@@ -12,7 +12,7 @@ from copy import deepcopy
 def norm_key(text): return re.sub(r'\W+', '', str(text).lower().strip()) if text else ""
 def convert_html_entities(text):
     if not isinstance(text, str): return text
-    html_entities = {'á':'á','é':'é','í':'í','ó':'ó','ú':'ú','ñ':'ñ','Á':'Á','É':'É','Í':'Í','Ó':'Ó','Ú':'Ú','Ñ':'Ñ','"':'"','“':'"','”':'"','‘':"'",'’':"'",'Â':'','â':'','€':'','™':''}
+    html_entities = {'á':'á','é':'é','í':'í','ó':'ó','ú':'ú','ñ':'ñ','Á':'Á','É':'É','Í':'Í','Ó':'Ó','Ú':'Ú','Ñ':'Ñ','"':'"','"':'"','"':'"',''':"'",''':"'",'Â':'','â':'','€':'','™':''}
     for entity, char in html_entities.items(): text = text.replace(entity, char)
     return text
 def normalize_title(title):
@@ -44,11 +44,11 @@ def mark_as_duplicate_to_delete(row):
 def is_title_problematic(title):
     if not isinstance(title, str): return False
     if re.search(r'\s*\|\s*[\w\s]+$', title): return True
-    if re.search(r'[Ââ€™“”“’‘]', title): return True
+    if re.search(r'[Ââ€™"""'']', title): return True
     return False
 
-# --- Función Principal (con la adición del diccionario de empresas) ---
-def run_deduplication_process(wb, empresa_dict):
+# --- Función Principal CORREGIDA ---
+def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
     sheet = wb.active
     custom_link_style = NamedStyle(name="CustomLink", font=Font(color="000000", underline="none"), alignment=Alignment(horizontal="left"), number_format='@')
     if "CustomLink" not in wb.named_styles: wb.add_named_style(custom_link_style)
@@ -69,6 +69,7 @@ def run_deduplication_process(wb, empresa_dict):
         elif tm_norm == 'diario': base_data[tipo_medio_key] = 'Prensa'
         elif tm_norm == 'online': base_data[tipo_medio_key] = 'Internet'
         elif tm_norm == 'revista': base_data[tipo_medio_key] = 'Revista'
+        
         link_nota_key, link_streaming_key = norm_key("Link Nota"), norm_key("Link (Streaming - Imagen)")
         tipo_medio_val = base_data.get(tipo_medio_key)
         if tipo_medio_val == "Internet": base_data[link_nota_key], base_data[link_streaming_key] = base_data.get(link_streaming_key), base_data.get(link_nota_key)
@@ -85,13 +86,28 @@ def run_deduplication_process(wb, empresa_dict):
             for mencion in menciones:
                 new_row = deepcopy(base_data)
                 mencion_limpia = mencion.lower().strip()
-                new_row[menciones_key] = empresa_dict.get(mencion_limpia, mencion) # <-- AQUÍ SE APLICA EL MAPEO
+                new_row[menciones_key] = empresa_dict.get(mencion_limpia, mencion)
                 processed_rows.append(new_row)
+
+    # APLICAR MAPEOS DE INTERNET Y REGIÓN DESPUÉS DE LA EXPANSIÓN
+    medio_key = norm_key('Medio')
+    tipo_medio_key = norm_key('Tipo de Medio')
+    region_key = norm_key('Región')
+    
+    for row in processed_rows:
+        # Mapeo de Internet
+        if str(row.get(tipo_medio_key, '')).lower().strip() == 'internet':
+            medio_val = str(row.get(medio_key, '')).lower().strip()
+            if medio_val in internet_dict:
+                row[medio_key] = internet_dict[medio_val]
+        
+        # Mapeo de Región
+        medio_actual_val = str(row.get(medio_key, '')).lower().strip()
+        row[region_key] = region_dict.get(medio_actual_val, "Online")
 
     for row in processed_rows: row.update({'Duplicada': "FALSE", 'Posible Duplicada': "FALSE", 'Mantener': "Conservar"})
 
-    # --- TU LÓGICA DE DETECCIÓN DE DUPLICADOS INTACTA ---
-    # FASE 1
+    # --- FASE 1: DUPLICADOS EXACTOS ---
     grupos_exactos = defaultdict(list)
     for idx, row in enumerate(processed_rows):
         key_tuple = (normalize_title(row.get(norm_key('Título'))), norm_key(row.get(norm_key('Medio'))), format_date_str(parse_date(row.get(norm_key('Fecha')))), norm_key(row.get(norm_key('Menciones - Empresa'))))
@@ -104,10 +120,49 @@ def run_deduplication_process(wb, empresa_dict):
                 processed_rows[idx]['Duplicada'] = "Sí"
                 if pos > 0: mark_as_duplicate_to_delete(processed_rows[idx])
 
-    # FASE 2 y 3 (tu código)
-    # ...
+    # --- FASE 2: POSIBLES DUPLICADOS POR TÍTULO ---
+    titulo_groups = defaultdict(list)
+    for idx, row in enumerate(processed_rows):
+        if row['Duplicada'] == "FALSE":
+            titulo_norm = normalize_title(row.get(norm_key('Título')))
+            if titulo_norm: titulo_groups[titulo_norm].append(idx)
+    
+    for indices in titulo_groups.values():
+        if len(indices) > 1:
+            for i in range(len(indices)):
+                for j in range(i+1, len(indices)):
+                    idx1, idx2 = indices[i], indices[j]
+                    row1, row2 = processed_rows[idx1], processed_rows[idx2]
+                    
+                    if (format_date_str(parse_date(row1.get(norm_key('Fecha')))) == format_date_str(parse_date(row2.get(norm_key('Fecha')))) and
+                        norm_key(row1.get(norm_key('Menciones - Empresa'))) == norm_key(row2.get(norm_key('Menciones - Empresa')))):
+                        
+                        if es_radio_o_tv(row1) and es_radio_o_tv(row2):
+                            if (norm_key(row1.get(norm_key('Medio'))) == norm_key(row2.get(norm_key('Medio'))) and
+                                str(row1.get(norm_key('Hora'))) == str(row2.get(norm_key('Hora')))):
+                                row1['Posible Duplicada'] = "Sí"; row2['Posible Duplicada'] = "Sí"
+                                mark_as_duplicate_to_delete(row2)
+                        else:
+                            row1['Posible Duplicada'] = "Sí"; row2['Posible Duplicada'] = "Sí"
+                            mark_as_duplicate_to_delete(row2)
 
-    # --- TU LÓGICA DE GENERACIÓN DE REPORTE FINAL INTACTA ---
+    # --- FASE 3: DUPLICADOS POR SIMILITUD DE TÍTULO ---
+    for idx, row in enumerate(processed_rows):
+        if row['Duplicada'] == "FALSE" and row['Posible Duplicada'] == "FALSE":
+            titulo_actual = normalize_title(row.get(norm_key('Título')))
+            if not titulo_actual: continue
+            
+            for idx2, row2 in enumerate(processed_rows):
+                if (idx2 != idx and row2['Duplicada'] == "FALSE" and row2['Posible Duplicada'] == "FALSE" and
+                    format_date_str(parse_date(row.get(norm_key('Fecha')))) == format_date_str(parse_date(row2.get(norm_key('Fecha')))) and
+                    norm_key(row.get(norm_key('Menciones - Empresa'))) == norm_key(row2.get(norm_key('Menciones - Empresa')))):
+                    
+                    titulo2 = normalize_title(row2.get(norm_key('Título')))
+                    if titulo2 and SequenceMatcher(None, titulo_actual, titulo2).ratio() > 0.8:
+                        row['Posible Duplicada'] = "Sí"; row2['Posible Duplicada'] = "Sí"
+                        mark_as_duplicate_to_delete(row2)
+
+    # --- GENERACIÓN DEL REPORTE FINAL ---
     final_order = ["ID Noticia", "Fecha", "Hora", "Medio", "Tipo de Medio", "Sección - Programa", "Región","Título", "Autor - Conductor", "Nro. Pagina", "Dimensión", "Duración - Nro. Caracteres", "CPE", "Tier", "Audiencia", "Tono", "Tema", "Temas Generales - Tema", "Resumen - Aclaracion", "Link Nota", "Link (Streaming - Imagen)", "Menciones - Empresa", "Duplicada", "Posible Duplicada", "Mantener"]
     new_wb = openpyxl.Workbook()
     new_sheet = new_wb.active

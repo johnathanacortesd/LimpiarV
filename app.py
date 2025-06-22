@@ -58,7 +58,7 @@ if check_password():
                     region_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_region_map, data_only=True).active.iter_rows(min_row=2) if r[0].value is not None}
                     empresa_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_empresa_map, data_only=True).active.iter_rows(min_row=2) if r[0].value is not None}
 
-                    status.write("🗺️ Aplicando mapeos previos (Internet y Región)...")
+                    status.write("🗺️ Preparando columna de Región...")
                     ws_main = wb_main.active
                     headers = [cell.value for cell in ws_main[1]]
                     
@@ -71,24 +71,10 @@ if check_password():
                         try: seccion_idx = headers.index("Sección - Programa"); insert_col_idx = seccion_idx + 2
                         except ValueError: insert_col_idx = len(headers) + 1
                         ws_main.insert_cols(insert_col_idx); ws_main.cell(row=1, column=insert_col_idx, value="Región")
-                        headers = [cell.value for cell in ws_main[1]] # Refrescar encabezados
-                    region_idx = headers.index("Región")
 
-                    # Aplicar mapeos de Internet y Región ANTES de la deduplicación
-                    for row in ws_main.iter_rows(min_row=2):
-                        # Lógica de Internet (SIMPLE Y DIRECTA)
-                        if str(row[tipo_medio_idx].value).lower().strip() == 'internet':
-                            medio_val = str(row[medio_idx].value).lower().strip()
-                            # Si el medio se encuentra en el diccionario, se reemplaza. Si no, no se hace nada.
-                            if medio_val in internet_dict:
-                                row[medio_idx].value = internet_dict[medio_val]
-                        
-                        # Lógica de Región
-                        medio_actual_val = str(row[medio_idx].value).lower().strip()
-                        row[region_idx].value = region_dict.get(medio_actual_val, "Online")
-
-                    status.write("🧠 Iniciando proceso de expansión y deduplicación...")
-                    final_wb, summary = run_deduplication_process(wb_main, empresa_dict)
+                    status.write("🧠 Iniciando proceso de expansión, mapeo y deduplicación...")
+                    # Pasar todos los diccionarios al deduplicador para que maneje todo el mapeo
+                    final_wb, summary = run_deduplication_process(wb_main, empresa_dict, internet_dict, region_dict)
                     
                     status.update(label="✅ ¡Análisis completado!", state="complete", expanded=True)
                     st.subheader("📊 Resumen del Proceso")

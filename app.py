@@ -61,11 +61,8 @@ if check_password():
                     ws_main = wb_main.active
                     headers = [cell.value for cell in ws_main[1]]
                     if "Región" not in headers:
-                        try:
-                            seccion_idx = headers.index("Sección - Programa")
-                            insert_col_idx = seccion_idx + 2
-                        except ValueError:
-                            insert_col_idx = len(headers) + 1 # Si no encuentra 'Sección', añade al final
+                        try: seccion_idx = headers.index("Sección - Programa"); insert_col_idx = seccion_idx + 2
+                        except ValueError: insert_col_idx = len(headers) + 1
                         ws_main.insert_cols(insert_col_idx)
                         ws_main.cell(row=1, column=insert_col_idx, value="Región")
                     

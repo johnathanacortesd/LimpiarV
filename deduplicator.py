@@ -1,5 +1,6 @@
-# deduplicator.py (versión final con el orden de operaciones correcto)
+# deduplicator.py
 
+import openpyxl
 from openpyxl.styles import Font, Alignment, NamedStyle
 from difflib import SequenceMatcher
 from collections import defaultdict
@@ -7,40 +8,37 @@ import re
 import datetime
 from copy import deepcopy
 
-# --- Funciones Auxiliares (sin cambios) ---
+# --- Funciones Auxiliares ---
 def norm_key(text): return re.sub(r'\W+', '', str(text).lower().strip()) if text else ""
-def convert_html_entities(text):
-    if not isinstance(text, str): return text
-    entities = {'á':'á','é':'é','í':'í','ó':'ó','ú':'ú','ñ':'ñ','Á':'Á','É':'É','Í':'í','Ó':'Ó','Ú':'Ú','Ñ':'Ñ','“':'"','”':'"','‘':"'",'’':"'",'Â':'','â':'','€':'','™':''}
-    for e, c in entities.items(): text = text.replace(e, c)
-    return text
+
 def normalize_title(title):
     if not isinstance(title, str): return ""
-    title = convert_html_entities(title); title = re.sub(r'\s*\|\s*[\w\s]+$', '', title)
+    title = re.sub(r'\s*\|\s*[\w\s]+$', '', title)
     return re.sub(r'\W+', ' ', title).lower().strip()
-def corregir_texto(text):
-    if not isinstance(text, str): return text
-    text = convert_html_entities(text); text = re.sub(r'(<br>|\[\.\.\.\]|\s+)', ' ', text).strip()
-    if match := re.search(r'[A-Z]', text): text = text[match.start():]
-    if text and not text.endswith('...'): text = text.rstrip('.') + '...'
-    return text
+
 def extract_root_domain(url):
     if not url: return None
     try:
-        cleaned_url = re.sub(r'^https?://', '', url).lower().replace('www.', ''); domain = cleaned_url.split('/')[0]
+        cleaned_url = re.sub(r'^https?://', '', url).lower().replace('www.', '')
+        domain = cleaned_url.split('/')[0]
         return domain.capitalize()
     except Exception: return None
+
 def parse_date(fecha):
     if isinstance(fecha, datetime.datetime): return fecha.date()
     try: return datetime.datetime.strptime(str(fecha).split(" ")[0], "%Y-%m-%d").date()
     except (ValueError, TypeError): return None
+
 def format_date_str(fecha_obj):
     if isinstance(fecha_obj, datetime.date): return fecha_obj.isoformat()
     return str(fecha_obj)[:10]
+
 def es_internet(row): return norm_key(row.get(norm_key('Tipo de Medio'))) == 'internet'
 def es_radio_o_tv(row): return norm_key(row.get(norm_key('Tipo de Medio'))) in {'radio', 'televisión'}
+
 def mark_as_duplicate_to_delete(row):
     row['Mantener']="Eliminar"; row[norm_key('Tono')]="Duplicada"; row[norm_key('Tema')]="-"; row[norm_key('Temas Generales - Tema')]="-"
+
 def is_title_problematic(title):
     if not isinstance(title, str): return False
     if re.search(r'\s*\|\s*[\w\s]+$', title): return True
@@ -51,24 +49,26 @@ def is_title_problematic(title):
 def run_deduplication_process(wb, internet_dict, region_dict, empresa_dict):
     sheet = wb.active
     
-    # --- PASO 1: LEER DATOS Y EXPANDIR FILAS ---
+    # PASO 1: LEER DATOS Y EXPANDIR FILAS
     headers = [cell.value for cell in sheet[1]]
     headers_norm = [norm_key(h) for h in headers]
     
-    # Extraer los datos a una estructura de Python para una manipulación más fácil y segura
     initial_rows = []
     for row_cells in sheet.iter_rows(min_row=2):
         if all(c.value is None for c in row_cells): continue
-        row_data = {headers_norm[i]: {"value": cell.value, "url": cell.hyperlink.target if cell.hyperlink else None} if headers_norm[i] in [norm_key('Link Nota'), norm_key('Link (Streaming - Imagen)')] else cell.value for i, cell in enumerate(row_cells)}
+        row_data = {
+            headers_norm[i]: {"value": cell.value, "url": cell.hyperlink.target if cell.hyperlink else None} 
+            if headers_norm[i] in [norm_key('Link Nota'), norm_key('Link (Streaming - Imagen)')] 
+            else cell.value 
+            for i, cell in enumerate(row_cells)
+        }
         initial_rows.append(row_data)
 
-    # Expansión de filas basada en menciones
     expanded_rows = []
     menciones_key_norm = norm_key('Menciones - Empresa')
     for base_row in initial_rows:
         menciones_str = str(base_row.get(menciones_key_norm) or '')
         menciones = [m.strip() for m in menciones_str.split(';') if m.strip()]
-        
         if not menciones:
             expanded_rows.append(base_row)
         else:
@@ -77,7 +77,7 @@ def run_deduplication_process(wb, internet_dict, region_dict, empresa_dict):
                 new_row[menciones_key_norm] = mencion
                 expanded_rows.append(new_row)
 
-    # --- PASO 2: APLICAR TODOS LOS MAPEOS A LAS FILAS YA EXPANDIDAS ---
+    # PASO 2: APLICAR TODOS LOS MAPEOS A LAS FILAS YA EXPANDIDAS
     processed_rows = []
     for row in expanded_rows:
         # 1. Mapeo de Empresas
@@ -100,13 +100,14 @@ def run_deduplication_process(wb, internet_dict, region_dict, empresa_dict):
         medio_actual = str(row.get(norm_key('Medio'))).lower().strip()
         row[norm_key('Región')] = region_dict.get(medio_actual, "Online")
         
+        # 4. Normalización final de Título
+        row[norm_key('Título')] = normalize_title(row.get(norm_key('Título')))
+        
         processed_rows.append(row)
 
-    # --- PASO 3: NORMALIZACIÓN Y LÓGICA DE DUPLICACIÓN ---
+    # PASO 3: LÓGICA DE DUPLICACIÓN
     for row in processed_rows:
-        row[norm_key('Título')] = normalize_title(row.get(norm_key('Título')))
         row.update({'Duplicada': "FALSE", 'Posible Duplicada': "FALSE", 'Mantener': "Conservar"})
-        # ... resto de la normalización ...
 
     # FASE 1: Duplicados Exactos
     grupos_exactos = defaultdict(list)
@@ -120,18 +121,18 @@ def run_deduplication_process(wb, internet_dict, region_dict, empresa_dict):
             for pos, idx in enumerate(indices):
                 processed_rows[idx]['Duplicada'] = "Sí"
                 if pos > 0: mark_as_duplicate_to_delete(processed_rows[idx])
-
-    # (Aquí irían las FASES 2 y 3 de duplicados, que son largas pero ya funcionan)
+    
+    # (Las Fases 2 y 3 de deduplicación irían aquí)
     # ...
 
-    # --- PASO 4: GENERACIÓN DEL REPORTE FINAL ---
+    # PASO 4: GENERACIÓN DEL REPORTE FINAL
     final_order = ["ID Noticia", "Fecha", "Hora", "Medio", "Tipo de Medio", "Sección - Programa", "Región","Título", "Autor - Conductor", "Nro. Pagina", "Dimensión", "Duración - Nro. Caracteres", "CPE", "Tier", "Audiencia", "Tono", "Tema", "Temas Generales - Tema", "Resumen - Aclaracion", "Link Nota", "Link (Streaming - Imagen)", "Menciones - Empresa", "Duplicada", "Posible Duplicada", "Mantener"]
     new_wb = openpyxl.Workbook()
     new_sheet = new_wb.active
     new_sheet.title = "Hoja1"
     new_sheet.append(final_order)
     
-    custom_link_style = NamedStyle(name="CustomLink"); custom_link_style.font = Font(color="0000FF", underline="single")
+    custom_link_style = NamedStyle(name="CustomLink", font=Font(color="0000FF", underline="single"))
     if "CustomLink" not in new_wb.named_styles: new_wb.add_named_style(custom_link_style)
 
     for row_data in processed_rows:
@@ -142,7 +143,6 @@ def run_deduplication_process(wb, internet_dict, region_dict, empresa_dict):
             else: new_row_to_append.append(val)
         new_sheet.append(new_row_to_append)
 
-    # Restaurar hipervínculos
     link_nota_idx_out = final_order.index("Link Nota") + 1
     for i, row_data in enumerate(processed_rows, start=2):
         link_data = row_data.get(norm_key("Link Nota"))

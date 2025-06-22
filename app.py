@@ -1,4 +1,4 @@
-# app.py (versión que solo prepara y llama al motor)
+# app.py
 
 import streamlit as st
 import openpyxl
@@ -6,7 +6,7 @@ import io
 import datetime
 from deduplicator import run_deduplication_process
 
-# --- Configuración y Autenticación (Sin cambios) ---
+# --- Configuración y Autenticación ---
 st.set_page_config(page_title="Intelli-Clean | Depurador IA", page_icon="🤖", layout="wide", initial_sidebar_state="expanded")
 def check_password():
     def password_entered():
@@ -61,8 +61,12 @@ if check_password():
                     ws_main = wb_main.active
                     headers = [cell.value for cell in ws_main[1]]
                     if "Región" not in headers:
-                        seccion_idx = headers.index("Sección - Programa")
-                        insert_col_idx = seccion_idx + 2; ws_main.insert_cols(insert_col_idx)
+                        try:
+                            seccion_idx = headers.index("Sección - Programa")
+                            insert_col_idx = seccion_idx + 2
+                        except ValueError:
+                            insert_col_idx = len(headers) + 1 # Si no encuentra 'Sección', añade al final
+                        ws_main.insert_cols(insert_col_idx)
                         ws_main.cell(row=1, column=insert_col_idx, value="Región")
                     
                     status.write("🧠 Iniciando procesamiento inteligente de datos...")

@@ -4,7 +4,6 @@ import streamlit as st
 import openpyxl
 import io
 import datetime
-# No es necesario 're' aquí
 from deduplicator import run_deduplication_process
 
 # --- Configuración y Autenticación (sin cambios) ---
@@ -39,79 +38,108 @@ if check_password():
 
     with st.sidebar:
         st.header("📂 Carga tus Archivos")
-        uploaded_main_file = st.file_uploader("1. Informe Principal de Noticias", type="xlsx")
-        uploaded_internet_map = st.file_uploader("2. Mapeo de Medios de Internet", type="xlsx")
-        uploaded_region_map = st.file_uploader("3. Mapeo de Regiones", type="xlsx")
-        uploaded_empresa_map = st.file_uploader("4. Mapeo de Nombres de Empresas", type="xlsx")
+        uploaded_main_file = st.file_uploader("1. Informe Principal de Noticias", type="xlsx", key="main_file")
+        uploaded_internet_map = st.file_uploader("2. Mapeo de Medios de Internet", type="xlsx", key="internet_map")
+        uploaded_region_map = st.file_uploader("3. Mapeo de Regiones", type="xlsx", key="region_map")
+        uploaded_empresa_map = st.file_uploader("4. Mapeo de Nombres de Empresas", type="xlsx", key="empresa_map")
         st.divider()
         process_button = st.button("🚀 Analizar y Depurar Archivos", type="primary", use_container_width=True)
 
-    st.header("Resultados del Análisis")
-    
+    # <<< --- INICIO DE LA LÓGICA CON SESSION STATE --- >>>
+
+    # Inicializamos las variables en session_state si no existen
+    if 'processing_complete' not in st.session_state:
+        st.session_state.processing_complete = False
+    if 'summary' not in st.session_state:
+        st.session_state.summary = {}
+    if 'main_stream' not in st.session_state:
+        st.session_state.main_stream = None
+    if 'nissan_stream' not in st.session_state:
+        st.session_state.nissan_stream = None
+
+    all_files_uploaded = (uploaded_main_file and uploaded_internet_map and 
+                          uploaded_region_map and uploaded_empresa_map)
+
+    # El bloque `if process_button` ahora solo se encarga de INICIAR el proceso y GUARDAR los resultados.
     if process_button:
-        if uploaded_main_file and uploaded_internet_map and uploaded_region_map and uploaded_empresa_map:
+        if all_files_uploaded:
             with st.status("Iniciando proceso... ⏳", expanded=True) as status:
                 try:
                     status.write("Cargando archivos y creando diccionarios de mapeo...")
                     wb_main = openpyxl.load_workbook(uploaded_main_file)
-                    # Añadida verificación para valores en diccionarios de mapeo
                     internet_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_internet_map, data_only=True).active.iter_rows(min_row=2) if r[0].value and r[1].value}
                     region_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_region_map, data_only=True).active.iter_rows(min_row=2) if r[0].value and r[1].value}
                     empresa_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_empresa_map, data_only=True).active.iter_rows(min_row=2) if r[0].value and r[1].value}
-                    
+
                     status.write("🧠 Iniciando proceso de expansión, mapeo y deduplicación...")
-                    
-                    # <<< --- INICIO DEL CAMBIO --- >>>
-                    # Capturar los tres valores devueltos por la función
                     final_wb, nissan_wb, summary = run_deduplication_process(wb_main, empresa_dict, internet_dict, region_dict)
-                    # <<< --- FIN DEL CAMBIO --- >>>
                     
                     status.update(label="✅ ¡Análisis completado!", state="complete", expanded=False)
-                    st.subheader("📊 Resumen del Proceso")
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Filas Totales Procesadas", summary['total_rows'])
-                    col2.metric("👍 Filas para Conservar", summary['to_conserve'])
-                    col3.metric("🗑️ Filas para Eliminar", summary['to_eliminate'])
-                    with st.expander("Ver detalles de duplicados"):
-                         st.write(f"**Duplicados exactos:** {summary['exact_duplicates']}")
-                         st.write(f"**Posibles duplicados:** {summary['possible_duplicates']}")
 
-                    st.divider()
-                    st.subheader("📥 Archivos para Descargar")
+                    # Guardamos el resumen en session_state
+                    st.session_state.summary = summary
 
-                    # Botón de descarga para el informe principal
+                    # Convertimos los workbooks a streams y los guardamos en session_state
                     main_stream = io.BytesIO()
                     final_wb.save(main_stream)
-                    main_stream.seek(0)
-                    main_filename = f"Informe_Depurado_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
-                    st.download_button(
-                        label="1. Descargar Informe Principal Depurado", 
-                        data=main_stream, 
-                        file_name=main_filename, 
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
-                        use_container_width=True
-                    )
-                
-                    # <<< --- INICIO DEL CAMBIO --- >>>
-                    # Botón de descarga para el informe Nissan Test
+                    st.session_state.main_stream = main_stream
+
                     nissan_stream = io.BytesIO()
                     nissan_wb.save(nissan_stream)
-                    nissan_stream.seek(0)
-                    nissan_filename = "nissan_test.xlsx"
-                    st.download_button(
-                        label="2. Descargar Reporte 'Nissan Test' (Resumen)",
-                        data=nissan_stream,
-                        file_name=nissan_filename,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
-                    # <<< --- FIN DEL CAMBIO --- >>>
+                    st.session_state.nissan_stream = nissan_stream
+                    
+                    # Activamos la bandera para indicar que el proceso terminó con éxito
+                    st.session_state.processing_complete = True
 
                 except Exception as e:
                     status.update(label="❌ Error en el proceso", state="error", expanded=True)
                     st.error(f"Ha ocurrido un error inesperado: {e}")
                     st.exception(e)
+                    # Nos aseguramos de que no se muestren resultados si hay un error
+                    st.session_state.processing_complete = False
         else:
             st.warning("⚠️ Por favor, asegúrate de cargar los cuatro archivos requeridos en la barra lateral.")
-    else:
+
+    # Este bloque ahora se encarga de MOSTRAR los resultados si la bandera está activa.
+    # Se ejecutará después del procesamiento y también en cada recarga (como al descargar un archivo).
+    if st.session_state.processing_complete:
+        st.header("Resultados del Análisis")
+        st.subheader("📊 Resumen del Proceso")
+        
+        summary = st.session_state.summary
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Filas Totales Procesadas", summary.get('total_rows', 0))
+        col2.metric("👍 Filas para Conservar", summary.get('to_conserve', 0))
+        col3.metric("🗑️ Filas para Eliminar", summary.get('to_eliminate', 0))
+        
+        with st.expander("Ver detalles de duplicados"):
+             st.write(f"**Duplicados exactos:** {summary.get('exact_duplicates', 0)}")
+             st.write(f"**Posibles duplicados:** {summary.get('possible_duplicates', 0)}")
+
+        st.divider()
+        st.subheader("📥 Archivos para Descargar")
+        
+        # Botón de descarga para el informe principal
+        main_filename = f"Informe_Depurado_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        st.download_button(
+            label="1. Descargar Informe Principal Depurado", 
+            data=st.session_state.main_stream, 
+            file_name=main_filename, 
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+            use_container_width=True
+        )
+    
+        # Botón de descarga para el informe Nissan Test
+        nissan_filename = "nissan_test.xlsx"
+        st.download_button(
+            label="2. Descargar Reporte 'Nissan Test' (Resumen)",
+            data=st.session_state.nissan_stream,
+            file_name=nissan_filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    elif not process_button:
+        # Mensaje inicial si no se ha procesado nada todavía
         st.info("Carga los archivos en el menú de la izquierda y haz clic en 'Analizar y Depurar' para comenzar.")
+
+    # <<< --- FIN DE LA LÓGICA CON SESSION STATE --- >>>

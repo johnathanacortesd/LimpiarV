@@ -255,33 +255,67 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
             row[titulo_key] = re.sub(r'\s*\|\s*[\w\s]+$', '', title).strip()
     processed_rows.sort(key=lambda r: (str(r.get(norm_key('Título'), '')).lower(), str(r.get(norm_key('Medio'), '')).lower()))
 
-    # FASE 6: GENERACIÓN DEL REPORTE FINAL
-    final_order = [ "ID Noticia", "Fecha", "Hora", "Medio", "Tipo de Medio", "Sección - Programa", "Región", "Título", "Autor - Conductor", "Nro. Pagina", "Dimensión", "Duración - Nro. Caracteres", "CPE", "Tier", "Audiencia", "Tono", "Tema", "Temas Generales - Tema", "Resumen - Aclaracion", "Link Nota", "Link (Streaming - Imagen)", "Menciones - Empresa", "Duplicada", "Posible Duplicada", "Mantener" ]
+    # --- FASE 6: GENERACIÓN DEL REPORTE FINAL ---
+    final_order = [
+        "ID Noticia", "Fecha", "Hora", "Medio", "Tipo de Medio", "Sección - Programa", "Región",
+        "Título", "Autor - Conductor", "Nro. Pagina", "Dimensión", "Duración - Nro. Caracteres", 
+        "CPE", "Tier", "Audiencia", "Tono", "Tema", "Temas Generales - Tema", 
+        "Resumen - Aclaracion", "Link Nota", "Link (Streaming - Imagen)", "Menciones - Empresa", 
+        "Duplicada", "Posible Duplicada", "Mantener"
+    ]
+    
     new_wb = openpyxl.Workbook()
     new_sheet = new_wb.active
     new_sheet.title = "Resultado Depurado"
     new_sheet.append(final_order)
+    
     if link_style_no_underline.name not in new_wb.named_styles:
         new_wb.add_named_style(link_style_no_underline)
-    link_nota_idx = final_order.index("Link Nota")
-    link_streaming_idx = final_order.index("Link (Streaming - Imagen)")
+
+    link_nota_idx = final_order.index("Link Nota") + 1  # +1 porque openpyxl es 1-based
+    link_streaming_idx = final_order.index("Link (Streaming - Imagen)") + 1
+
     for row_data in processed_rows:
-        new_row_to_append = [row_data.get(norm_key(h), row_data.get(h)) for h in final_order]
+        # <<< --- INICIO DE LA CORRECCIÓN --- >>>
+        
+        # Paso 1: Crear una lista con valores simples para `append`.
+        # Si el valor es nuestro diccionario de link, extraemos solo el texto a mostrar.
+        new_row_to_append = []
+        for header in final_order:
+            key = norm_key(header)
+            val = row_data.get(key, row_data.get(header))
+            
+            if isinstance(val, dict):
+                # Extraemos el valor de texto (ej. 'Link') para el append.
+                new_row_to_append.append(val.get('value')) 
+            else:
+                new_row_to_append.append(val)
+        
+        # Ahora `new_row_to_append` solo contiene valores simples y no causará error.
         new_sheet.append(new_row_to_append)
+        
+        # <<< --- FIN DE LA CORRECCIÓN --- >>>
+        
+        # Paso 2: Ahora que la fila existe, obtenemos su índice y aplicamos los hipervínculos.
         current_row_idx = new_sheet.max_row
+        
+        # Aplicar hipervínculo para "Link Nota"
         link_nota_data = row_data.get(norm_key("Link Nota"))
         if isinstance(link_nota_data, dict) and link_nota_data.get("url"):
-            cell = new_sheet.cell(row=current_row_idx, column=link_nota_idx + 1)
+            cell = new_sheet.cell(row=current_row_idx, column=link_nota_idx)
             cell.hyperlink = link_nota_data["url"]
-            cell.value = "Link"
+            cell.value = "Link" # Aseguramos que el texto sea "Link"
             cell.style = link_style_no_underline.name
+        
+        # Aplicar hipervínculo para "Link (Streaming - Imagen)"
         link_stream_data = row_data.get(norm_key("Link (Streaming - Imagen)"))
         if isinstance(link_stream_data, dict) and link_stream_data.get("url"):
-            cell = new_sheet.cell(row=current_row_idx, column=link_streaming_idx + 1)
+            cell = new_sheet.cell(row=current_row_idx, column=link_streaming_idx)
             cell.hyperlink = link_stream_data["url"]
-            cell.value = "Link"
+            cell.value = "Link" # Aseguramos que el texto sea "Link"
             cell.style = link_style_no_underline.name
     
+    # Resumen para la app
     to_eliminate_count = sum(1 for r in processed_rows if r['Mantener'] == ELIMINAR)
     summary = {
         "total_rows": len(processed_rows),
@@ -290,4 +324,5 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
         "exact_duplicates": sum(1 for r in processed_rows if r[DUPLICADA] == SI),
         "possible_duplicates": sum(1 for r in processed_rows if r['Posible Duplicada'] == SI and r[DUPLICADA] == NO)
     }
+    
     return new_wb, summary

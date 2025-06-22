@@ -76,29 +76,32 @@ if check_password():
                     ws_main = wb_main.active
                     headers = [cell.value for cell in ws_main[1]]
                     
+                    try:
+                        medio_idx = headers.index("Medio"); tipo_medio_idx = headers.index("Tipo de Medio"); link_nota_idx = headers.index("Link Nota")
+                    except ValueError as e:
+                        st.error(f"Error Crítico: La columna '{e.args[0].split(' ')[0]}' no se encontró."); st.stop()
+                    
                     if "Región" not in headers:
                         try: seccion_idx = headers.index("Sección - Programa"); insert_col_idx = seccion_idx + 2
                         except ValueError: insert_col_idx = len(headers) + 1
                         ws_main.insert_cols(insert_col_idx); ws_main.cell(row=1, column=insert_col_idx, value="Región")
-                        # --- LÍNEA DE CORRECCIÓN ---
-                        # Volvemos a leer los encabezados DESPUÉS de modificarlos
-                        headers = [cell.value for cell in ws_main[1]]
-                    
-                    try:
-                        medio_idx = headers.index("Medio"); tipo_medio_idx = headers.index("Tipo de Medio"); link_nota_idx = headers.index("Link Nota"); region_idx = headers.index("Región")
-                    except ValueError as e:
-                        st.error(f"Error Crítico: La columna '{e.args[0].split(' ')[0]}' no se encontró."); st.stop()
+                        headers = [cell.value for cell in ws_main[1]] # Refrescar encabezados
+                    region_idx = headers.index("Región")
 
                     # Aplicar mapeos de Internet y Región ANTES de la deduplicación
                     for row in ws_main.iter_rows(min_row=2):
+                        # Lógica de Internet (CORREGIDA según tus instrucciones)
                         if str(row[tipo_medio_idx].value).lower().strip() == 'internet':
                             medio_val = str(row[medio_idx].value).lower().strip()
+                            # Prioridad 1: Buscar en el archivo de mapeo.
                             if medio_val in internet_dict:
                                 row[medio_idx].value = internet_dict[medio_val]
                             else:
+                                # Prioridad 2 (Plan B): Si NO se encuentra, extraer de la URL.
                                 if root_domain := extract_root_domain(get_url_from_cell(row[link_nota_idx])):
                                     row[medio_idx].value = root_domain
                         
+                        # Lógica de Región
                         medio_actual_val = str(row[medio_idx].value).lower().strip()
                         row[region_idx].value = region_dict.get(medio_actual_val, "Online")
 

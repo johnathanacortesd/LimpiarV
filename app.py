@@ -20,10 +20,10 @@ def extract_root_domain(url):
         return domain.capitalize()
     except Exception: return None
 
-# --- Configuración y Autenticación (Sin cambios) ---
+# --- Configuración y Autenticación ---
 st.set_page_config(page_title="Intelli-Clean | Depurador IA", page_icon="🤖", layout="wide", initial_sidebar_state="expanded")
 def check_password():
-    # ... (código de contraseña idéntico) ...
+    # ... (código de contraseña idéntico y funcional) ...
     def password_entered():
         try:
             if st.session_state["password"] == st.secrets.password.password:
@@ -76,7 +76,6 @@ if check_password():
                     ws_main = wb_main.active
                     headers = [cell.value for cell in ws_main[1]]
                     
-                    # Preparar columnas
                     try:
                         medio_idx = headers.index("Medio"); tipo_medio_idx = headers.index("Tipo de Medio"); link_nota_idx = headers.index("Link Nota")
                     except ValueError as e:
@@ -86,19 +85,22 @@ if check_password():
                         try: seccion_idx = headers.index("Sección - Programa"); insert_col_idx = seccion_idx + 2
                         except ValueError: insert_col_idx = len(headers) + 1
                         ws_main.insert_cols(insert_col_idx); ws_main.cell(row=1, column=insert_col_idx, value="Región")
-                        region_idx = insert_col_idx - 1
-                    else: region_idx = headers.index("Región")
+                    region_idx = headers.index("Región")
 
                     # Aplicar mapeos de Internet y Región ANTES de la deduplicación
                     for row in ws_main.iter_rows(min_row=2):
+                        # Lógica de Internet (CORREGIDA según tus instrucciones)
                         if str(row[tipo_medio_idx].value).lower().strip() == 'internet':
                             medio_val = str(row[medio_idx].value).lower().strip()
+                            # Prioridad 1: Buscar en el archivo de mapeo.
                             if medio_val in internet_dict:
                                 row[medio_idx].value = internet_dict[medio_val]
                             else:
+                                # Prioridad 2 (Plan B): Si NO se encuentra, extraer de la URL.
                                 if root_domain := extract_root_domain(get_url_from_cell(row[link_nota_idx])):
                                     row[medio_idx].value = root_domain
                         
+                        # Lógica de Región
                         medio_actual_val = str(row[medio_idx].value).lower().strip()
                         row[region_idx].value = region_dict.get(medio_actual_val, "Online")
 

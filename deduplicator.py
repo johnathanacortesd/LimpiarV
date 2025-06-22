@@ -12,7 +12,7 @@ from copy import deepcopy
 def norm_key(text): return re.sub(r'\W+', '', str(text).lower().strip()) if text else ""
 def convert_html_entities(text):
     if not isinstance(text, str): return text
-    html_entities = {'á':'á','é':'é','í':'í','ó':'ó','ú':'ú','ñ':'ñ','Á':'Á','É':'É','Í':'Í','Ó':'Ó','Ú':'Ú','Ñ':'Ñ','"':'"','"':'"','"':'"',''':"'",''':"'",'Â':'','â':'','€':'','™':''}
+    html_entities = {'á':'á','é':'é','í':'í','ó':'ó','ú':'ú','ñ':'ñ','Á':'Á','É':'É','Í':'Í','Ó':'Ó','Ú':'Ú','Ñ':'Ñ','"':'"','“':'"','”':'"','‘':"'",'’':"'",'Â':'','â':'','€':'','™':''}
     for entity, char in html_entities.items(): text = text.replace(entity, char)
     return text
 def normalize_title(title):
@@ -44,20 +44,20 @@ def mark_as_duplicate_to_delete(row):
 def is_title_problematic(title):
     if not isinstance(title, str): return False
     if re.search(r'\s*\|\s*[\w\s]+$', title): return True
-    if re.search(r'[Ââ€™"""'']', title): return True
+    if re.search(r'[Ââ€™“”“’‘]', title): return True
     return False
 
 # --- Función Principal CORREGIDA ---
 def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
     sheet = wb.active
     custom_link_style = NamedStyle(name="CustomLink", font=Font(color="000000", underline="none"), alignment=Alignment(horizontal="left"), number_format='@')
-    if "CustomLink" not in wb.named_styles: wb.add_named_style(custom_link_style)
         
     headers = [cell.value for cell in sheet[1]]
     headers_norm = [norm_key(h) for h in headers]
-    processed_rows = []
-
-    for row_idx, row_cells in enumerate(sheet.iter_rows(min_row=2)):
+    
+    # PASO 1: Leer, normalizar y expandir filas
+    expanded_rows = []
+    for row_cells in sheet.iter_rows(min_row=2):
         if all(c.value is None for c in row_cells): continue
         base_data = {headers_norm[i]: extract_link(cell) if headers_norm[i] in [norm_key('Link Nota'), norm_key('Link (Streaming - Imagen)')] else cell.value for i, cell in enumerate(row_cells)}
         
@@ -81,34 +81,37 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
         menciones_key = norm_key('Menciones - Empresa'); menciones_str = str(base_data.get(menciones_key) or '')
         menciones = [m.strip() for m in menciones_str.split(';') if m.strip()]
         if not menciones:
-            processed_rows.append(base_data)
+            expanded_rows.append(base_data)
         else:
             for mencion in menciones:
                 new_row = deepcopy(base_data)
-                mencion_limpia = mencion.lower().strip()
-                new_row[menciones_key] = empresa_dict.get(mencion_limpia, mencion)
-                processed_rows.append(new_row)
+                new_row[menciones_key] = mencion
+                expanded_rows.append(new_row)
 
-    # APLICAR MAPEOS DE INTERNET Y REGIÓN DESPUÉS DE LA EXPANSIÓN PERO ANTES DE DEDUPLICACIÓN
-    medio_key = norm_key('Medio')
-    tipo_medio_key = norm_key('Tipo de Medio')
-    region_key = norm_key('Región')
-    
-    for row in processed_rows:
+    # PASO 2: APLICAR MAPEOS DE EMPRESA, INTERNET Y REGIÓN DESPUÉS DE LA EXPANSIÓN
+    for row in expanded_rows:
+        # Mapeo de Empresas
+        mencion_key = norm_key('Menciones - Empresa')
+        mencion_val = str(row.get(mencion_key, '')).lower().strip()
+        if mencion_val in empresa_dict:
+            row[mencion_key] = empresa_dict[mencion_val]
+
         # Mapeo de Internet
-        if str(row.get(tipo_medio_key, '')).lower().strip() == 'internet':
+        medio_key = norm_key('Medio')
+        if str(row.get(norm_key('Tipo de Medio'), '')).lower().strip() == 'internet':
             medio_val = str(row.get(medio_key, '')).lower().strip()
             if medio_val in internet_dict:
                 row[medio_key] = internet_dict[medio_val]
         
-        # Mapeo de Región (aplicar después del mapeo de Internet para usar el nombre correcto)
+        # Mapeo de Región
         medio_actual_val = str(row.get(medio_key, '')).lower().strip()
-        row[region_key] = region_dict.get(medio_actual_val, "Online")
+        row[norm_key('Región')] = region_dict.get(medio_actual_val, "Online")
 
-    # Inicializar campos de duplicación
+    # PASO 3: Detección de duplicados
+    processed_rows = expanded_rows
     for row in processed_rows: row.update({'Duplicada': "FALSE", 'Posible Duplicada': "FALSE", 'Mantener': "Conservar"})
 
-    # --- FASE 1: DUPLICADOS EXACTOS (TU LÓGICA ORIGINAL INTACTA) ---
+    # FASE 1: DUPLICADOS EXACTOS
     grupos_exactos = defaultdict(list)
     for idx, row in enumerate(processed_rows):
         key_tuple = (normalize_title(row.get(norm_key('Título'))), norm_key(row.get(norm_key('Medio'))), format_date_str(parse_date(row.get(norm_key('Fecha')))), norm_key(row.get(norm_key('Menciones - Empresa'))))
@@ -120,10 +123,10 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
             for pos, idx in enumerate(indices):
                 processed_rows[idx]['Duplicada'] = "Sí"
                 if pos > 0: mark_as_duplicate_to_delete(processed_rows[idx])
-
-    # FASE 2 y 3: Aquí deberías agregar el resto de tu lógica original de detección de duplicados si la tenías
-
-    # --- GENERACIÓN DEL REPORTE FINAL ---
+    
+    # ... Aquí irían las Fases 2 y 3 de tu lógica original de duplicados ...
+    
+    # PASO 4: GENERACIÓN DEL REPORTE FINAL
     final_order = ["ID Noticia", "Fecha", "Hora", "Medio", "Tipo de Medio", "Sección - Programa", "Región","Título", "Autor - Conductor", "Nro. Pagina", "Dimensión", "Duración - Nro. Caracteres", "CPE", "Tier", "Audiencia", "Tono", "Tema", "Temas Generales - Tema", "Resumen - Aclaracion", "Link Nota", "Link (Streaming - Imagen)", "Menciones - Empresa", "Duplicada", "Posible Duplicada", "Mantener"]
     new_wb = openpyxl.Workbook()
     new_sheet = new_wb.active
@@ -150,8 +153,6 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
             if link_stream := processed.get(norm_key("Link (Streaming - Imagen)")):
                  if isinstance(link_stream, dict) and link_stream.get("url"):
                     cell = row_cells[link_streaming_idx]; cell.hyperlink = link_stream["url"]; cell.value = "Link"; cell.style = "CustomLink"
-    
-    wb.remove(wb.active)
     
     summary = {"total_rows": len(processed_rows), "to_eliminate": sum(1 for r in processed_rows if r['Mantener'] == 'Eliminar'), "to_conserve": len(processed_rows) - sum(1 for r in processed_rows if r['Mantener'] == 'Eliminar'), "exact_duplicates": sum(1 for r in processed_rows if r['Duplicada'] == 'Sí'), "possible_duplicates": sum(1 for r in processed_rows if r['Posible Duplicada'] == 'Sí')}
     return new_wb, summary

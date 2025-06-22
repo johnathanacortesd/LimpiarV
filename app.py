@@ -90,7 +90,7 @@ if check_password():
                     status.write("🧠 Iniciando proceso de expansión y deduplicación...")
                     final_wb, summary = run_deduplication_process(wb_main, empresa_dict)
                     
-                    status.update(label="✅ ¡Análisis completado!", state="complete", expanded=False)
+                    status.update(label="✅ ¡Análisis completado!", state="complete", expanded=True)
                     st.subheader("📊 Resumen del Proceso")
                     col1, col2, col3 = st.columns(3); col1.metric("Filas Totales", summary['total_rows'])
                     col2.metric("👍 Filas para Conservar", summary['to_conserve'])

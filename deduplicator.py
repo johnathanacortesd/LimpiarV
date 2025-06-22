@@ -9,8 +9,19 @@ import datetime
 from copy import deepcopy
 import html
 
+# --- CONSTANTES ---
+# Usar constantes mejora la legibilidad y previene errores de tipeo.
+CONSERVAR = "Conservar"
+ELIMINAR = "Eliminar"
+SI = "Sí"
+NO = "No"
+DUPLICADA = "Duplicada"
+TONO_DUPLICADA = "Duplicada"
+TEMA_VACIO = "-"
+
 # --- FUNCIONES AUXILIARES ---
 def norm_key(text): 
+    """Normaliza un texto para usarlo como clave: minúsculas, sin espacios ni caracteres especiales."""
     return re.sub(r'\W+', '', str(text).lower().strip()) if text else ""
 
 def convert_html_entities(text):
@@ -24,7 +35,7 @@ def normalize_title(title):
     if not isinstance(title, str):
         return ""
     title = convert_html_entities(title)
-    # Remover sufijos como "| Medio Name"
+    # Remover sufijos como "| Medio Name" que a veces quedan
     title = re.sub(r'\s*\|\s*[\w\s]+$', '', title)
     # Remover todos los caracteres no alfanuméricos y convertir a minúsculas
     title = re.sub(r'\W+', '', title.lower().strip())
@@ -42,7 +53,7 @@ def corregir_texto(text):
     if match := re.search(r'[A-Z]', text): 
         text = text[match.start():]
     
-    # Asegurar que termine con puntos suspensivos
+    # Asegurar que termine con puntos suspensivos si no es un final de oración
     if text and not text.endswith('...'):
         text = re.sub(r'[\.,;:]$', '', text.strip()).strip()
         text += '...'
@@ -78,16 +89,12 @@ def parse_date_obj(date_val):
         try:
             return datetime.datetime.strptime(date_val.split(' ')[0], '%Y-%m-%d').date()
         except (ValueError, AttributeError):
-            return datetime.date(1, 1, 1)
-    return datetime.date(1, 1, 1)
+            return datetime.date.min
+    return datetime.date.min
 
 def es_internet(row): 
     """Verifica si el 'Tipo de Medio' es 'Internet'."""
     return norm_key(row.get(norm_key('Tipo de Medio'))) == 'internet'
-
-def es_radio_o_tv(row): 
-    """Verifica si el 'Tipo de Medio' es 'Radio' o 'Televisión'."""
-    return norm_key(row.get(norm_key('Tipo de Medio'))) in {'radio', 'televisión'}
 
 def is_title_problematic(title):
     """Detecta si un título es problemático (genérico, mala codificación)."""
@@ -99,40 +106,39 @@ def is_title_problematic(title):
     # Detectar mala codificación de caracteres
     if re.search(r'[Ââ€™"""'']', title):
         return True
-    # Detectar sufijos problemáticos que no se limpiaron bien
-    if re.search(r'\s*\|\s*[\w\s]+$', title):
-        return True
     return False
 
 def mark_as_duplicate_to_delete(row):
-    """Marca una fila para ser eliminada."""
-    row['Mantener'] = "Eliminar"
-    row[norm_key('Tono')] = "Duplicada"
-    row[norm_key('Tema')] = "-"
-    row[norm_key('Temas Generales - Tema')] = "-"
+    """Marca una fila para ser eliminada y limpia sus campos."""
+    row['Mantener'] = ELIMINAR
+    row[norm_key('Tono')] = TONO_DUPLICADA
+    row[norm_key('Tema')] = TEMA_VACIO
+    row[norm_key('Temas Generales - Tema')] = TEMA_VACIO
 
-def get_title_priority(row):
-    """Asigna una puntuación de prioridad basada en el formato del título y el medio."""
-    medio_key = norm_key('Medio')
-    titulo_key = norm_key('Título')
-    medio_norm = norm_key(row.get(medio_key))
-    titulo_str = str(row.get(titulo_key, ''))
-    
-    # Priorizar ciertos medios con formatos específicos
-    if medio_norm == norm_key('El Colombiano (Online)'):
-        return 1 if '| El Colombiano' in titulo_str else 0
-    if medio_norm == norm_key('El Nuevo Siglo (Online)'):
-        return 1 if titulo_str.strip().endswith('El Nuevo Siglo') else 0
-    return 0
-
-def get_title_cleanliness_score(row):
+def get_row_priority_score(row):
     """
-    Asigna una puntuación de "limpieza". Un título es "sucio" si su versión original
-    es diferente a la versión limpia. Puntuación más baja es mejor.
+    Calcula una tupla de puntuación para una fila.
+    Una puntuación más baja es mejor (se ordenará de menor a mayor).
+    El objetivo es que la fila a conservar tenga la puntuación más baja.
     """
     original_title = str(row.get('original_titulo', ''))
     cleaned_title = str(row.get(norm_key('Título'), ''))
-    return 0 if original_title == cleaned_title else 1
+    
+    # Puntuación 0 (mejor) si el título original ya estaba limpio, 1 si no.
+    cleanliness_score = 0 if original_title == cleaned_title else 1
+    
+    # Puntuación 0 si el título contiene comillas (prioridad alta), 1 si no.
+    quotes_score = 0 if '"' in original_title else 1
+    
+    # Puntuación de fecha/hora (más reciente es mejor, por eso se niega)
+    fecha_obj = parse_date_obj(row.get(norm_key('Fecha')))
+    hora_val = row.get(norm_key('Hora')) or datetime.time.min
+    
+    # Índice de fila original como desempate final
+    original_index = row.get('original_row_index', float('inf'))
+
+    return (cleanliness_score, quotes_score, -fecha_obj.toordinal(), -hora_val.hour, -hora_val.minute, original_index)
+
 
 # --- FUNCIÓN PRINCIPAL ---
 def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
@@ -140,11 +146,14 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
     Procesa el workbook aplicando expansión por menciones, mapeos y deduplicación completa.
     """
     sheet = wb.active
-    custom_link_style = NamedStyle(name="CustomLink", 
-                                 font=Font(color="0000FF", underline="single"), 
-                                 alignment=Alignment(horizontal="left"))
-    if "CustomLink" not in wb.named_styles: 
-        wb.add_named_style(custom_link_style)
+
+    # --- REQUISITO: ESTILO DE LINK MODIFICADO ---
+    # Texto negro, sin subrayado.
+    link_style_no_underline = NamedStyle(name="LinkNegroSinSubrayado", 
+                                         font=Font(color="000000", underline=None), 
+                                         alignment=Alignment(horizontal="left"))
+    if link_style_no_underline.name not in wb.named_styles:
+        wb.add_named_style(link_style_no_underline)
         
     headers = [cell.value for cell in sheet[1]]
     headers_norm = [norm_key(h) for h in headers]
@@ -155,7 +164,6 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
         if all(c.value is None for c in row_cells): 
             continue
             
-        # Crear diccionario base con datos de la fila
         base_data = {'original_row_index': row_idx + 2}
         for i, cell in enumerate(row_cells):
             col_name = headers_norm[i]
@@ -164,53 +172,27 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
             else:
                 base_data[col_name] = cell.value
 
-        # Guardar título original antes de limpiarlo
         titulo_key = norm_key('Título')
         original_title = str(base_data.get(titulo_key, ''))
         base_data['original_titulo'] = original_title
         base_data[titulo_key] = convert_html_entities(original_title)
         
-        # Limpiar el resumen
-        base_data[norm_key('Resumen - Aclaracion')] = corregir_texto(
-            base_data.get(norm_key('Resumen - Aclaracion'))
-        )
+        base_data[norm_key('Resumen - Aclaracion')] = corregir_texto(base_data.get(norm_key('Resumen - Aclaracion')))
         
-        # Normalizar tipos de medio
         tipo_medio_key = norm_key('Tipo de Medio')
         tm_norm = norm_key(base_data.get(tipo_medio_key))
-        if tm_norm in {'aire', 'cable'}: 
-            base_data[tipo_medio_key] = 'Televisión'
-        elif tm_norm in {'am', 'fm'}: 
-            base_data[tipo_medio_key] = 'Radio'
-        elif tm_norm == 'diario': 
-            base_data[tipo_medio_key] = 'Prensa'
-        elif tm_norm == 'online': 
-            base_data[tipo_medio_key] = 'Internet'
-        elif tm_norm == 'revista': 
-            base_data[tipo_medio_key] = 'Revista'
+        if tm_norm in {'aire', 'cable'}: base_data[tipo_medio_key] = 'Televisión'
+        elif tm_norm in {'am', 'fm'}: base_data[tipo_medio_key] = 'Radio'
+        elif tm_norm == 'diario': base_data[tipo_medio_key] = 'Prensa'
+        elif tm_norm == 'online': base_data[tipo_medio_key] = 'Internet'
+        elif tm_norm == 'revista': base_data[tipo_medio_key] = 'Revista'
         
-        # Reorganizar links según tipo de medio
         link_nota_key, link_streaming_key = norm_key("Link Nota"), norm_key("Link (Streaming - Imagen)")
-        tipo_medio_val = base_data.get(tipo_medio_key)
-        
-        if tipo_medio_val == "Internet":
-            # Para internet: intercambiar los links
-            base_data[link_nota_key], base_data[link_streaming_key] = (
-                base_data.get(link_streaming_key), base_data.get(link_nota_key)
-            )
-        elif tipo_medio_val in {"Prensa", "Revista"}:
-            # Si no hay link_nota pero sí streaming, mover streaming a nota
-            is_link_nota_empty = (not base_data.get(link_nota_key) 
-                                or not base_data.get(link_nota_key, {}).get('url'))
-            has_streaming_link = base_data.get(link_streaming_key, {}).get('url')
-            if is_link_nota_empty and has_streaming_link:
-                base_data[link_nota_key] = base_data.get(link_streaming_key)
+        if es_internet({'Tipo de Medio': base_data.get(tipo_medio_key)}):
+            base_data[link_nota_key], base_data[link_streaming_key] = base_data.get(link_streaming_key), base_data.get(link_nota_key)
+        else:
             base_data[link_streaming_key] = None
-        elif tipo_medio_val in {"Radio", "Televisión"}: 
-            # Para radio/TV: limpiar streaming
-            base_data[link_streaming_key] = None
-        
-        # Expandir por menciones de empresa
+
         menciones_key = norm_key('Menciones - Empresa')
         menciones_str = str(base_data.get(menciones_key) or '')
         menciones = [m.strip() for m in menciones_str.split(';') if m.strip()]
@@ -220,149 +202,110 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
         else:
             for mencion in menciones:
                 new_row = deepcopy(base_data)
-                # Aplicar mapeo de empresas
                 mencion_limpia = mencion.lower().strip()
                 new_row[menciones_key] = empresa_dict.get(mencion_limpia, mencion)
                 processed_rows.append(new_row)
 
-    # --- FASE 2: APLICAR MAPEOS DE INTERNET Y REGIÓN ---
-    medio_key = norm_key('Medio')
-    tipo_medio_key = norm_key('Tipo de Medio')
-    region_key = norm_key('Región')
-    
+    # --- FASE 2: MAPEOS Y PREPARACIÓN ---
     for row in processed_rows:
-        # Mapeo de Internet
-        if str(row.get(tipo_medio_key, '')).lower().strip() == 'internet':
-            medio_val = str(row.get(medio_key, '')).lower().strip()
+        if es_internet(row):
+            medio_val = str(row.get(norm_key('Medio'), '')).lower().strip()
             if medio_val in internet_dict:
-                row[medio_key] = internet_dict[medio_val]
+                row[norm_key('Medio')] = internet_dict[medio_val]
         
-        # Mapeo de Región (aplicar después del mapeo de Internet)
-        medio_actual_val = str(row.get(medio_key, '')).lower().strip()
-        row[region_key] = region_dict.get(medio_actual_val, "Online")
+        medio_actual_val = str(row.get(norm_key('Medio'), '')).lower().strip()
+        row[norm_key('Región')] = region_dict.get(medio_actual_val, "Online")
 
-    # --- FASE 3: INICIALIZAR CAMPOS DE DEDUPLICACIÓN ---
-    for row in processed_rows:
-        row.update({
-            'Duplicada': "FALSE",
-            'Posible Duplicada': "FALSE",
-            'Mantener': "Conservar"
-        })
-
-    # --- FASE 4: MARCAR TÍTULOS PROBLEMÁTICOS ---
-    for row in processed_rows:
+        row.update({'Duplicada': NO, 'Posible Duplicada': NO, 'Mantener': CONSERVAR})
+        
         if is_title_problematic(row.get(norm_key('Título'))):
-            row['Duplicada'] = "Sí"
+            row[DUPLICADA] = SI
             mark_as_duplicate_to_delete(row)
 
-    # --- FASE 5: DETECTAR DUPLICADOS EXACTOS ---
+    # --- FASE 3: DETECTAR DUPLICADOS EXACTOS ---
     grupos_exactos = defaultdict(list)
     for idx, row in enumerate(processed_rows):
-        if row['Mantener'] == 'Eliminar': 
-            continue
+        if row['Mantener'] == ELIMINAR: continue
             
-        key_tuple = (
+        key_parts = [
             normalize_title(row.get(norm_key('Título'))),
             norm_key(row.get(norm_key('Medio'))),
             norm_key(row.get(norm_key('Menciones - Empresa'))),
             format_date(row.get(norm_key('Fecha')))
-        )
+        ]
+        if not es_internet(row): key_parts.append(str(row.get(norm_key('Hora'))))
         
-        # Para medios que no son internet, incluir la hora en la clave
-        if not es_internet(row):
-            key_tuple += (str(row.get(norm_key('Hora'))),)
-            
-        grupos_exactos[key_tuple].append(idx)
+        grupos_exactos[tuple(key_parts)].append(idx)
 
-    # Procesar grupos de duplicados exactos
     for indices in grupos_exactos.values():
         if len(indices) > 1:
-            # Ordenar por prioridad (el mejor queda primero)
-            indices.sort(key=lambda i: processed_rows[i].get('original_row_index'))
-            indices.sort(key=lambda i: '"' in str(processed_rows[i].get(norm_key('Título'), '')), reverse=True)
-            indices.sort(key=lambda i: get_title_priority(processed_rows[i]), reverse=True)
-            indices.sort(key=lambda i: get_title_cleanliness_score(processed_rows[i]))
-            
-            # Marcar todos como duplicados, eliminar todos excepto el primero
+            indices.sort(key=lambda i: get_row_priority_score(processed_rows[i]))
             for pos, idx in enumerate(indices):
-                processed_rows[idx]['Duplicada'] = "Sí"
-                if pos > 0:
-                    mark_as_duplicate_to_delete(processed_rows[idx])
+                processed_rows[idx][DUPLICADA] = SI
+                if pos > 0: mark_as_duplicate_to_delete(processed_rows[idx])
 
-    # --- FASE 6: DETECTAR DUPLICADOS POR SIMILITUD ---
+    # --- FASE 4: DETECTAR DUPLICADOS POR SIMILITUD ---
     SIMILARIDAD_MINIMA = 0.85
     grupos_para_similitud = defaultdict(list)
     
-    # Agrupar noticias no duplicadas por criterios similares
     for idx, row in enumerate(processed_rows):
-        if row['Duplicada'] == 'FALSE' and row['Mantener'] == 'Conservar':
-            key_tuple = (
+        if row[DUPLICADA] == NO and row['Mantener'] == CONSERVAR:
+            key_parts = [
                 norm_key(row.get(norm_key('Medio'))),
                 norm_key(row.get(norm_key('Menciones - Empresa'))),
                 format_date(row.get(norm_key('Fecha')))
-            )
-            
-            # Para medios que no son internet, incluir la hora
-            if not es_internet(row):
-                key_tuple += (str(row.get(norm_key('Hora'))),)
-                
-            grupos_para_similitud[key_tuple].append(idx)
+            ]
+            if not es_internet(row): key_parts.append(str(row.get(norm_key('Hora'))))
+            grupos_para_similitud[tuple(key_parts)].append(idx)
 
-    # Procesar similitud dentro de cada grupo
     for group in grupos_para_similitud.values():
-        if len(group) < 2: 
-            continue
-            
-        # Usar Union-Find para encontrar clusters de títulos similares
+        if len(group) < 2: continue
+        
+        # Agrupar por similitud de títulos con Union-Find
         parent = {i: i for i in group}
+        def find(i):
+            if parent[i] == i: return i
+            parent[i] = find(parent[i])
+            return parent[i]
+        def union(i, j):
+            root_i, root_j = find(i), find(j)
+            if root_i != root_j: parent[root_j] = root_i
         
-        def find(x):
-            if parent[x] == x: 
-                return x
-            parent[x] = find(parent[x])
-            return parent[x]
-        
-        def union(x, y):
-            rx, ry = find(x), find(y)
-            if rx != ry: 
-                parent[ry] = rx
-        
-        # Comparar todos los pares y unir los similares
         for i in range(len(group)):
             for j in range(i + 1, len(group)):
                 idx_i, idx_j = group[i], group[j]
-                row_i, row_j = processed_rows[idx_i], processed_rows[idx_j]
-                
-                title_i = normalize_title(row_i.get(norm_key('Título')))
-                title_j = normalize_title(row_j.get(norm_key('Título')))
-                
-                if (title_i and title_j and 
-                    SequenceMatcher(None, title_i, title_j).ratio() >= SIMILARIDAD_MINIMA):
+                title_i = normalize_title(processed_rows[idx_i].get(norm_key('Título')))
+                title_j = normalize_title(processed_rows[idx_j].get(norm_key('Título')))
+                if title_i and title_j and SequenceMatcher(None, title_i, title_j).ratio() >= SIMILARIDAD_MINIMA:
                     union(idx_i, idx_j)
         
-        # Crear clusters y procesar duplicados
         clusters = defaultdict(list)
-        for i in group: 
-            clusters[find(i)].append(i)
+        for i in group: clusters[find(i)].append(i)
         
         for cluster in clusters.values():
             if len(cluster) > 1:
-                # Ordenar por prioridad dentro del cluster
-                cluster.sort(key=lambda i: (
-                    parse_date_obj(processed_rows[i].get(norm_key('Fecha'))), 
-                    processed_rows[i].get(norm_key('Hora')) or datetime.time(0, 0)
-                ), reverse=True)
-                cluster.sort(key=lambda i: '"' in str(processed_rows[i].get(norm_key('Título'), '')), reverse=True)
-                cluster.sort(key=lambda i: get_title_priority(processed_rows[i]), reverse=True)
-                cluster.sort(key=lambda i: get_title_cleanliness_score(processed_rows[i]))
-                
-                # Marcar como posibles duplicados
+                cluster.sort(key=lambda i: get_row_priority_score(processed_rows[i]))
                 for pos, idx in enumerate(cluster):
-                    processed_rows[idx]['Posible Duplicada'] = "Sí"
-                    if pos > 0 and processed_rows[idx]['Mantener'] != "Eliminar":
-                        mark_as_duplicate_to_delete(processed_rows[idx])
+                    processed_rows[idx]['Posible Duplicada'] = SI
+                    if pos > 0: mark_as_duplicate_to_delete(processed_rows[idx])
+    
+    # --- FASE 5: LIMPIEZA FINAL Y ORDENAMIENTO ---
 
-    # --- FASE 7: GENERACIÓN DEL REPORTE FINAL ---
+    # Limpiar títulos de las filas que se conservan
+    for row in processed_rows:
+        if row['Mantener'] == CONSERVAR:
+            titulo_key = norm_key('Título')
+            title = str(row.get(titulo_key, ''))
+            row[titulo_key] = re.sub(r'\s*\|\s*[\w\s]+$', '', title).strip()
+
+    # --- REQUISITO: ORDENAMIENTO FINAL DEL REPORTE ---
+    # Ordenar primero por 'Título' (A-Z) y luego por 'Medio' (A-Z)
+    processed_rows.sort(key=lambda r: (
+        str(r.get(norm_key('Título'), '')).lower(),
+        str(r.get(norm_key('Medio'), '')).lower()
+    ))
+    
+    # --- FASE 6: GENERACIÓN DEL REPORTE FINAL ---
     final_order = [
         "ID Noticia", "Fecha", "Hora", "Medio", "Tipo de Medio", "Sección - Programa", "Región",
         "Título", "Autor - Conductor", "Nro. Pagina", "Dimensión", "Duración - Nro. Caracteres", 
@@ -373,70 +316,44 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
     
     new_wb = openpyxl.Workbook()
     new_sheet = new_wb.active
-    new_sheet.title = "Resultado"
+    new_sheet.title = "Resultado Depurado"
     new_sheet.append(final_order)
     
-    if "CustomLink" not in new_wb.named_styles: 
-        new_wb.add_named_style(custom_link_style)
+    if link_style_no_underline.name not in new_wb.named_styles:
+        new_wb.add_named_style(link_style_no_underline)
 
-    # Ordenar filas por índice original para mantener el orden
-    processed_rows.sort(key=lambda r: r.get('original_row_index', 0))
-
-    # Aplicar limpieza final de títulos solo para filas que se conservan
-    for row_data in processed_rows:
-        if row_data['Mantener'] == 'Conservar':
-            titulo_key = norm_key('Título')
-            # Limpiar sufijos problemáticos del título final
-            title = str(row_data.get(titulo_key, ''))
-            title = re.sub(r'\s*\|\s*[\w\s]+$', '', title).strip()
-            row_data[titulo_key] = title
-        
-        # Agregar fila al nuevo sheet
-        new_row_to_append = []
-        for header in final_order:
-            key = norm_key(header)
-            val = row_data.get(key, row_data.get(header, None))
-            if isinstance(val, dict):
-                new_row_to_append.append(val.get('value'))
-            else:
-                new_row_to_append.append(val)
-        new_sheet.append(new_row_to_append)
-    
-    # Agregar hipervínculos
     link_nota_idx = final_order.index("Link Nota")
     link_streaming_idx = final_order.index("Link (Streaming - Imagen)")
+
+    for row_data in processed_rows:
+        new_row_to_append = [row_data.get(norm_key(h), row_data.get(h)) for h in final_order]
+        new_sheet.append(new_row_to_append)
+        
+        current_row_idx = new_sheet.max_row
+        
+        # Aplicar hipervínculos con el nuevo estilo
+        link_nota_data = row_data.get(norm_key("Link Nota"))
+        if isinstance(link_nota_data, dict) and link_nota_data.get("url"):
+            cell = new_sheet.cell(row=current_row_idx, column=link_nota_idx + 1)
+            cell.hyperlink = link_nota_data["url"]
+            cell.value = "Link"
+            cell.style = link_style_no_underline.name
+        
+        link_stream_data = row_data.get(norm_key("Link (Streaming - Imagen)"))
+        if isinstance(link_stream_data, dict) and link_stream_data.get("url"):
+            cell = new_sheet.cell(row=current_row_idx, column=link_streaming_idx + 1)
+            cell.hyperlink = link_stream_data["url"]
+            cell.value = "Link"
+            cell.style = link_style_no_underline.name
     
-    for i, row_cells in enumerate(new_sheet.iter_rows(min_row=2)):
-        if i < len(processed_rows):
-            processed = processed_rows[i]
-            
-            # Link Nota
-            link_data = processed.get(norm_key("Link Nota"))
-            if link_data and isinstance(link_data, dict) and link_data.get("url"):
-                cell = row_cells[link_nota_idx]
-                cell.hyperlink = link_data["url"]
-                cell.value = "Link"
-                cell.style = "CustomLink"
-            
-            # Link Streaming
-            link_data_stream = processed.get(norm_key("Link (Streaming - Imagen)"))
-            if link_data_stream and isinstance(link_data_stream, dict) and link_data_stream.get("url"):
-                cell = row_cells[link_streaming_idx]
-                cell.hyperlink = link_data_stream["url"]
-                cell.value = "Link"
-                cell.style = "CustomLink"
-    
-    # Eliminar la hoja original
-    if wb.active in wb.worksheets:
-        wb.remove(wb.active)
-    
-    # Calcular resumen
+    # Resumen para la app
+    to_eliminate_count = sum(1 for r in processed_rows if r['Mantener'] == ELIMINAR)
     summary = {
         "total_rows": len(processed_rows),
-        "to_eliminate": sum(1 for r in processed_rows if r['Mantener'] == 'Eliminar'),
-        "to_conserve": len(processed_rows) - sum(1 for r in processed_rows if r['Mantener'] == 'Eliminar'),
-        "exact_duplicates": sum(1 for r in processed_rows if r['Duplicada'] == 'Sí'),
-        "possible_duplicates": sum(1 for r in processed_rows if r['Posible Duplicada'] == 'Sí' and r['Duplicada'] == 'FALSE')
+        "to_eliminate": to_eliminate_count,
+        "to_conserve": len(processed_rows) - to_eliminate_count,
+        "exact_duplicates": sum(1 for r in processed_rows if r[DUPLICADA] == SI),
+        "possible_duplicates": sum(1 for r in processed_rows if r['Posible Duplicada'] == SI and r[DUPLICADA] == NO)
     }
     
     return new_wb, summary

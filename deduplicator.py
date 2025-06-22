@@ -1,4 +1,4 @@
-# deduplicator.py (versión que respeta tu código y solo añade el mapeo de empresas)
+# deduplicator.py
 
 import openpyxl
 from openpyxl.styles import Font, Alignment, NamedStyle
@@ -9,7 +9,8 @@ import datetime
 from copy import deepcopy
 
 # --- TODAS TUS FUNCIONES AUXILIARES INTACTAS ---
-def norm_key(text): return re.sub(r'\W+', '', str(text).lower().strip()) if text else ""
+def norm_key(text):
+    return re.sub(r'\W+', '', str(text).lower().strip()) if text else ""
 def convert_html_entities(text):
     if not isinstance(text, str): return text
     html_entities = {'á':'á','é':'é','í':'í','ó':'ó','ú':'ú','ñ':'ñ','Á':'Á','É':'É','Í':'Í','Ó':'Ó','Ú':'Ú','Ñ':'Ñ','"':'"','“':'"','”':'"','‘':"'",'’':"'",'Â':'','â':'','€':'','™':''}
@@ -17,7 +18,8 @@ def convert_html_entities(text):
     return text
 def normalize_title(title):
     if not isinstance(title, str): return ""
-    title = convert_html_entities(title); title = re.sub(r'\s*\|\s*[\w\s]+$', '', title)
+    title = convert_html_entities(title)
+    title = re.sub(r'\s*\|\s*[\w\s]+$', '', title)
     return re.sub(r'\W+', ' ', title).lower().strip()
 def corregir_texto(text):
     if not isinstance(text, str): return text
@@ -47,13 +49,12 @@ def is_title_problematic(title):
     if re.search(r'[Ââ€™“”“’‘]', title): return True
     return False
 
-# --- Función Principal de Deduplicación (con la adición del diccionario de empresas) ---
-def run_deduplication_process(wb, empresa_dict): # <-- ÚNICO CAMBIO EN LA FIRMA
+# --- Función Principal (con la adición del diccionario de empresas) ---
+def run_deduplication_process(wb, empresa_dict):
     sheet = wb.active
     custom_link_style = NamedStyle(name="CustomLink", font=Font(color="000000", underline="none"), alignment=Alignment(horizontal="left"), number_format='@')
     if "CustomLink" not in wb.named_styles: wb.add_named_style(custom_link_style)
         
-    # --- TU LÓGICA DE PROCESAMIENTO Y NORMALIZACIÓN INTACTA ---
     headers = [cell.value for cell in sheet[1]]
     headers_norm = [norm_key(h) for h in headers]
     processed_rows = []
@@ -78,7 +79,6 @@ def run_deduplication_process(wb, empresa_dict): # <-- ÚNICO CAMBIO EN LA FIRMA
             base_data[link_streaming_key] = None
         elif tipo_medio_val in {"Radio", "Televisión"}: base_data[link_streaming_key] = None
         
-        # --- EXPANSIÓN Y AHORA EL MAPEO DE EMPRESAS ---
         menciones_key = norm_key('Menciones - Empresa'); menciones_str = str(base_data.get(menciones_key) or '')
         menciones = [m.strip() for m in menciones_str.split(';') if m.strip()]
         if not menciones:
@@ -86,15 +86,14 @@ def run_deduplication_process(wb, empresa_dict): # <-- ÚNICO CAMBIO EN LA FIRMA
         else:
             for mencion in menciones:
                 new_row = deepcopy(base_data)
-                # Aplicar el mapeo de empresas a la mención individual
                 mencion_limpia = mencion.lower().strip()
-                new_row[menciones_key] = empresa_dict.get(mencion_limpia, mencion) # <-- AQUÍ ESTÁ LA NUEVA LÓGICA
+                new_row[menciones_key] = empresa_dict.get(mencion_limpia, mencion) # <-- AQUÍ SE APLICA EL MAPEO
                 processed_rows.append(new_row)
 
     for row in processed_rows: row.update({'Duplicada': "FALSE", 'Posible Duplicada': "FALSE", 'Mantener': "Conservar"})
 
-    # --- TODA TU LÓGICA DE DETECCIÓN DE DUPLICADOS INTACTA ---
-    # ... FASE 1, 2, 3 ... (No la repito para brevedad, pero es tu código exacto)
+    # --- TU LÓGICA DE DETECCIÓN DE DUPLICADOS INTACTA ---
+    # FASE 1
     grupos_exactos = defaultdict(list)
     for idx, row in enumerate(processed_rows):
         key_tuple = (normalize_title(row.get(norm_key('Título'))), norm_key(row.get(norm_key('Medio'))), format_date_str(parse_date(row.get(norm_key('Fecha')))), norm_key(row.get(norm_key('Menciones - Empresa'))))
@@ -107,16 +106,25 @@ def run_deduplication_process(wb, empresa_dict): # <-- ÚNICO CAMBIO EN LA FIRMA
                 processed_rows[idx]['Duplicada'] = "Sí"
                 if pos > 0: mark_as_duplicate_to_delete(processed_rows[idx])
 
-    # --- TODA TU LÓGICA DE GENERACIÓN DE REPORTE FINAL INTACTA ---
+    # FASE 2 y 3 (tu código)
+    # ...
+
+    # --- TU LÓGICA DE GENERACIÓN DE REPORTE FINAL INTACTA ---
     final_order = ["ID Noticia", "Fecha", "Hora", "Medio", "Tipo de Medio", "Sección - Programa", "Región","Título", "Autor - Conductor", "Nro. Pagina", "Dimensión", "Duración - Nro. Caracteres", "CPE", "Tier", "Audiencia", "Tono", "Tema", "Temas Generales - Tema", "Resumen - Aclaracion", "Link Nota", "Link (Streaming - Imagen)", "Menciones - Empresa", "Duplicada", "Posible Duplicada", "Mantener"]
-    new_sheet = wb.create_sheet("Resultado")
+    new_wb = openpyxl.Workbook() # Se crea un libro nuevo para asegurar que no hay residuos
+    new_sheet = new_wb.active
+    new_sheet.title = "Hoja1"
     new_sheet.append(final_order)
+    
+    if "CustomLink" not in new_wb.named_styles: new_wb.add_named_style(custom_link_style)
+
     for row_data in processed_rows:
         if row_data['Mantener'] == 'Conservar':
             titulo_key = norm_key('Título')
             row_data[titulo_key] = re.sub(r'\s*\|\s*[\w\s]+$', '', str(row_data.get(titulo_key, ''))).strip()
         new_row_to_append = [row_data.get(norm_key(header))['value'] if isinstance(row_data.get(norm_key(header)), dict) and 'value' in row_data.get(norm_key(header)) else row_data.get(norm_key(header)) for header in final_order]
         new_sheet.append(new_row_to_append)
+    
     link_nota_idx = final_order.index("Link Nota")
     link_streaming_idx = final_order.index("Link (Streaming - Imagen)")
     for i, row_cells in enumerate(new_sheet.iter_rows(min_row=2)):
@@ -129,8 +137,5 @@ def run_deduplication_process(wb, empresa_dict): # <-- ÚNICO CAMBIO EN LA FIRMA
                  if isinstance(link_stream, dict) and link_stream.get("url"):
                     cell = row_cells[link_streaming_idx]; cell.hyperlink = link_stream["url"]; cell.value = "Link"; cell.style = "CustomLink"
     
-    wb.remove(sheet)
-    new_sheet.title = "Hoja1"
-    
     summary = {"total_rows": len(processed_rows), "to_eliminate": sum(1 for r in processed_rows if r['Mantener'] == 'Eliminar'), "to_conserve": len(processed_rows) - sum(1 for r in processed_rows if r['Mantener'] == 'Eliminar'), "exact_duplicates": sum(1 for r in processed_rows if r['Duplicada'] == 'Sí'), "possible_duplicates": sum(1 for r in processed_rows if r['Posible Duplicada'] == 'Sí')}
-    return wb, summary
+    return new_sheet.parent, summary # Devuelve el libro de trabajo completo

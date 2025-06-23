@@ -7,6 +7,7 @@ import datetime
 import pandas as pd
 import openai
 import numpy as np
+from openpyxl.styles import Alignment # Importación necesaria para el formato de celda
 from sklearn.metrics.pairwise import cosine_similarity
 from unidecode import unidecode
 import re
@@ -40,7 +41,7 @@ def check_password():
         return False
     return True
 
-# --- CLASES DE ANÁLISIS DE IA (CON CORRECCIÓN DE NOMENCLATURA) ---
+# --- CLASES DE ANÁLISIS DE IA (Con corrección de nomenclatura) ---
 class ClasificadorTonoNoticias:
     def __init__(self, marca, client_openai):
         self.marca=marca; self.client=client_openai; self.embeddings_cache={}; self.tonos_asignados_cache={}; self.grupos_similares_info={}
@@ -96,7 +97,6 @@ class ClasificadorTonoNoticias:
     def procesar_dataframe(self, df, columna_texto):
         df.columns = [unidecode(col.strip().lower()).replace(' ', '') for col in df.columns]
         if columna_texto not in df.columns: st.error(f"Error interno: La columna '{columna_texto}' no se encuentra en el dataframe procesado."); return df
-        # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula desde la creación >>>
         df['tono']="No Procesado"
         total_rows=len(df)
         status_text = st.empty()
@@ -105,17 +105,14 @@ class ClasificadorTonoNoticias:
             item_to_rep_map=self.detectar_grupos_similares(df, embeddings_list)
             for idx in range(total_rows):
                 status_text.text(f"Analizando Tono: Fila {idx+1}/{total_rows}")
-                # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula para la comprobación >>>
                 if df.at[idx, 'tono'] != "No Procesado": continue
                 if idx in item_to_rep_map:
                     rep_idx=item_to_rep_map[idx]
                     if self.grupos_similares_info[rep_idx]['tono'] is None:
                         tono_rep=self.clasificar_tono_noticia_gpt(df.iloc[rep_idx][columna_texto])
                         self.grupos_similares_info[rep_idx]['tono']=tono_rep
-                    # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula para la asignación >>>
                     df.at[idx, 'tono']=self.grupos_similares_info[rep_idx]['tono']
                 else: 
-                    # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula para la asignación >>>
                     df.at[idx, 'tono']=self.clasificar_tono_noticia_gpt(df.iloc[idx][columna_texto])
         status_text.empty()
         return df
@@ -208,7 +205,6 @@ class ClasificadorTemasAvanzado:
     def procesar_dataframe(self, df, columna_texto):
         df.columns = [unidecode(col.strip().lower()).replace(' ', '') for col in df.columns]
         if columna_texto not in df.columns: st.error(f"Error interno: La columna '{columna_texto}' no se encuentra en el dataframe procesado."); return df
-        # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula desde la creación >>>
         df['tema'] = "No Procesado"
         total_rows = len(df)
         status_text = st.empty()
@@ -224,19 +220,15 @@ class ClasificadorTemasAvanzado:
                     all_keywords = [kw for texto in textos_cluster for kw in self.extraer_keywords_clave(texto)]
                     top_keywords = [kw for kw, freq in Counter(all_keywords).most_common(10)]
                     tema_cluster = self.generar_tema_inteligente(textos_cluster, top_keywords)
-                    # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula para la asignación >>>
                     for idx in indices: df.at[idx, 'tema'] = tema_cluster
                 elif indices:
                     idx = indices[0]
                     texto = df.iloc[idx][columna_texto]
-                    # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula para la asignación >>>
                     df.at[idx, 'tema'] = self.generar_tema_individual(texto)
-            # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula para la comprobación >>>
             elementos_sin_tema = df[df['tema'] == "No Procesado"]
             if not elementos_sin_tema.empty:
                 for idx in elementos_sin_tema.index:
                     texto = df.iloc[idx][columna_texto]
-                    # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula para la asignación >>>
                     df.at[idx, 'tema'] = self.generar_tema_individual(texto)
         status_text.empty()
         return df
@@ -392,7 +384,6 @@ if check_password():
                             df_analizado_ia = clasificador_tema.procesar_dataframe(df_con_tono.copy(), 'resumen')
                             df_final_completo = st.session_state.df_depurado.copy()
                             if len(df_final_completo) == len(df_analizado_ia):
-                                # Con la corrección en las clases, ahora estamos seguros de que estas columnas existen y están en minúsculas.
                                 df_final_completo['Tono_IA'] = df_analizado_ia['tono'].values
                                 df_final_completo['Tema_IA'] = df_analizado_ia['tema'].values
                             else:
@@ -402,10 +393,27 @@ if check_password():
                             resumen_texto = generar_resumen_estrategico(client, df_final_completo, marca)
                             st.session_state.resumen_ejecutivo = resumen_texto
                             status.update(label="¡Análisis IA completado!", state="complete", expanded=False)
+
+                        # <<< INICIO DE LA MODIFICACIÓN PARA AÑADIR LA SEGUNDA PESTAÑA >>>
                         output_stream = io.BytesIO()
                         with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
+                            # Pestaña 1: Los datos completos
                             df_final_completo.to_excel(writer, index=False, sheet_name='Resultados_IA')
+
+                            # Pestaña 2: El resumen ejecutivo
+                            if 'resumen_ejecutivo' in st.session_state and st.session_state.resumen_ejecutivo:
+                                resumen_texto = st.session_state.resumen_ejecutivo
+                                summary_df = pd.DataFrame({'Diagnostico General': [resumen_texto]})
+                                summary_df.to_excel(writer, index=False, sheet_name='Diagnostico_General')
+                                
+                                # Formatear la celda del resumen para mejor legibilidad
+                                worksheet = writer.sheets['Diagnostico_General']
+                                worksheet.column_dimensions['A'].width = 120
+                                cell = worksheet['A2']
+                                cell.alignment = Alignment(wrap_text=True, vertical='top')
+                        
                         st.session_state.ai_analyzed_stream = output_stream
+                        # <<< FIN DE LA MODIFICACIÓN >>>
                         st.session_state.ai_analysis_complete = True
                         st.balloons()
                 except openai.AuthenticationError:
@@ -425,9 +433,9 @@ if check_password():
             st.markdown("---")
         if 'ai_analyzed_stream' in st.session_state and st.session_state.ai_analyzed_stream:
             st.subheader("📥 Descargar Reporte Final")
-            st.info("Este archivo contiene los datos depurados con las columnas 'Tono_IA' y 'Tema_IA' añadidas.")
+            st.info("Este archivo contiene los datos depurados, las columnas de análisis IA y una pestaña con el diagnóstico.")
             st.download_button(
-                label="2. Descargar Reporte Completo Analizado con IA",
+                label="2. Descargar Reporte Completo con Diagnóstico",
                 data=st.session_state.ai_analyzed_stream.getvalue(),
                 file_name=f"Reporte_Analizado_IA_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

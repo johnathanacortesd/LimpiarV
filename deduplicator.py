@@ -1,5 +1,6 @@
 # deduplicator.py
 
+# --- INICIO DE LAS IMPORTACIONES ---
 import openpyxl
 from openpyxl.styles import Font, Alignment, NamedStyle
 from difflib import SequenceMatcher
@@ -9,7 +10,7 @@ import datetime
 from copy import deepcopy
 import html
 
-# --- CONSTANTES Y FUNCIONES AUXILIARES (Sin cambios) ---
+# --- CONSTANTES Y FUNCIONES AUXILIARES ---
 CONSERVAR = "Conservar"
 ELIMINAR = "Eliminar"
 SI = "Sí"
@@ -17,7 +18,7 @@ NO = "FALSE"
 TONO_DUPLICADA = "Duplicada"
 TEMA_VACIO = "-"
 
-def norm_key(text): 
+def norm_key(text):
     return re.sub(r'\W+', '', str(text).lower().strip()) if text else ""
 
 def convert_html_entities(text):
@@ -25,18 +26,21 @@ def convert_html_entities(text):
     return html.unescape(text)
 
 def normalize_title(title):
-    if not isinstance(title, str): return ""
-    title = convert_html_entities(title)
-    title = re.sub(r'\s*\|\s*[\w\s]+$', '', title)
-    title = re.sub(r'\W+', '', title.lower().strip())
-    return title
+    if not isinstance(title, str):
+        return ""
+    processed_title = convert_html_entities(title)
+    processed_title = processed_title.lower()
+    processed_title = processed_title.strip()
+    processed_title = re.sub(r'\s*\|\s*[\w\s]+$', '', processed_title)
+    processed_title = re.sub(r'\W+', '', processed_title)
+    return processed_title
 
 def corregir_texto(text):
     if not isinstance(text, str): return text
     text = convert_html_entities(text)
     text = text.replace('<br>', ' ').replace('[...]', ' ')
     text = re.sub(r'\s+', ' ', text).strip()
-    if match := re.search(r'[A-Z]', text): 
+    if match := re.search(r'[A-Z]', text):
         text = text[match.start():]
     if text and not text.endswith('...'):
         text = re.sub(r'[\.,;:]$', '', text.strip()).strip()
@@ -47,7 +51,7 @@ def extract_link(cell):
     if cell.hyperlink and cell.hyperlink.target:
         return {"value": cell.value or "Link", "url": cell.hyperlink.target}
     if cell.value and isinstance(cell.value, str):
-        if match := re.search(r'=HYPERLINK\("([^"]+)"', cell.value): 
+        if match := re.search(r'=HYPERLINK\("([^"]+)"', cell.value):
             return {"value": "Link", "url": match.group(1)}
     return {"value": cell.value, "url": None}
 
@@ -65,7 +69,10 @@ def parse_date_obj(date_val):
     if isinstance(date_val, (datetime.datetime, datetime.date)): return date_val
     if isinstance(date_val, str):
         try:
-            return datetime.datetime.strptime(date_val.split(' ')[0], '%Y-%m-%d')
+            if '/' in date_val:
+                return datetime.datetime.strptime(date_val.split(' ')[0], '%d/%m/%Y')
+            else:
+                return datetime.datetime.strptime(date_val.split(' ')[0], '%Y-%m-%d')
         except (ValueError, AttributeError):
             return datetime.datetime.min
     return datetime.datetime.min
@@ -79,7 +86,7 @@ def parse_time_obj(time_val):
             except ValueError: continue
     return datetime.time.min
 
-def es_internet(row): 
+def es_internet(row):
     return norm_key(row.get(norm_key('Tipo de Medio'))) == 'internet'
 
 def is_title_problematic(title):
@@ -107,19 +114,33 @@ def get_title_cleanliness_score(row):
     cleaned_title = str(row.get(norm_key('Título'), ''))
     return 0 if original_title == cleaned_title else 1
 
-# --- FUNCIÓN PRINCIPAL (MODIFICADA) ---
-def run_deduplication_process(wb, internet_dict, region_dict): # <-- Se elimina empresa_dict
+def are_rows_similar(row_i, row_j):
+    SIMILARIDAD_MINIMA = 0.85
+    if norm_key(row_i.get(norm_key('Medio'))) != norm_key(row_j.get(norm_key('Medio'))):
+        return False
+    if norm_key(row_i.get(norm_key('Menciones - Empresa'))) != norm_key(row_j.get(norm_key('Menciones - Empresa'))):
+        return False
+    date_i = parse_date_obj(row_i.get(norm_key('Fecha')))
+    date_j = parse_date_obj(row_j.get(norm_key('Fecha')))
+    if not (date_i and date_j and abs((date_i - date_j).days) <= 1):
+        return False
+    title_i = normalize_title(row_i.get(norm_key('Título')))
+    title_j = normalize_title(row_j.get(norm_key('Título')))
+    if not (title_i and title_j and SequenceMatcher(None, title_i, title_j).ratio() >= SIMILARIDAD_MINIMA):
+        return False
+    return True
+
+def run_deduplication_process(wb, internet_dict, region_dict):
     sheet = wb.active
-    custom_link_style = NamedStyle(name="CustomLink", 
-                                 font=Font(color="0000FF", underline="single"), 
-                                 alignment=Alignment(horizontal="left"))
-    if "CustomLink" not in wb.named_styles: 
+    custom_link_style = NamedStyle(name="CustomLink",
+                                   font=Font(color="0000FF", underline="single"),
+                                   alignment=Alignment(horizontal="left"))
+    if "CustomLink" not in wb.named_styles:
         wb.add_named_style(custom_link_style)
     headers = [cell.value for cell in sheet[1]]
     headers_norm = [norm_key(h) for h in headers]
     processed_rows = []
-    
-    # --- FASE 1: EXPANSIÓN POR MENCIONES Y LIMPIEZA INICIAL ---
+
     for row_idx, row_cells in enumerate(sheet.iter_rows(min_row=2)):
         if all(c.value is None for c in row_cells): continue
         base_data = {'original_row_index': row_idx + 2}
@@ -152,22 +173,18 @@ def run_deduplication_process(wb, internet_dict, region_dict): # <-- Se elimina 
             base_data[link_streaming_key] = None
         elif tipo_medio_val in {"Radio", "Televisión"}: base_data[link_streaming_key] = None
         
-        # <<< INICIO DE LA MODIFICACIÓN: Eliminación del mapeo de empresas >>>
         menciones_key = norm_key('Menciones - Empresa')
         menciones_str = str(base_data.get(menciones_key) or '')
         menciones = [m.strip() for m in menciones_str.split(';') if m.strip()]
-        
-        if not menciones: 
+        if not menciones:
             processed_rows.append(base_data)
         else:
             for mencion in menciones:
                 new_row = deepcopy(base_data)
-                # Ya no se mapea el nombre, simplemente se asigna la mención de la iteración.
-                new_row[menciones_key] = mencion 
+                # Ya no se usa el mapeo de empresas, se usa la mención tal cual.
+                new_row[menciones_key] = mencion
                 processed_rows.append(new_row)
-        # <<< FIN DE LA MODIFICACIÓN >>>
 
-    # --- FASE 2 a 7 (Sin cambios en su lógica interna) ---
     medio_key, tipo_medio_key, region_key = norm_key('Medio'), norm_key('Tipo de Medio'), norm_key('Región')
     for row in processed_rows:
         if str(row.get(tipo_medio_key, '')).lower().strip() == 'internet':
@@ -175,80 +192,76 @@ def run_deduplication_process(wb, internet_dict, region_dict): # <-- Se elimina 
             if medio_val in internet_dict: row[medio_key] = internet_dict[medio_val]
         medio_actual_val = str(row.get(medio_key, '')).lower().strip()
         row[region_key] = region_dict.get(medio_actual_val, "Online")
-    
+
     for row in processed_rows:
-        row.update({'Duplicada': NO, 'Posible Duplicada': NO, 'Mantener': CONSERVAR})
+        row.update({'Duplicada': NO, 'Posible Duplicada': NO, 'Mantener': CONSERVAR, 'ID Fila Conservada': ''})
     
     for row in processed_rows:
         if is_title_problematic(row.get(norm_key('Título'))):
+            row['Mantener'] = ELIMINAR
             row['Duplicada'] = SI
-            mark_as_duplicate_to_delete(row)
-    
+            
     grupos_exactos = defaultdict(list)
     for idx, row in enumerate(processed_rows):
         if row['Mantener'] == ELIMINAR: continue
         key_tuple = (normalize_title(row.get(norm_key('Título'))), norm_key(row.get(norm_key('Medio'))), norm_key(row.get(norm_key('Menciones - Empresa'))), format_date(row.get(norm_key('Fecha'))))
         if not es_internet(row): key_tuple += (str(row.get(norm_key('Hora'))),)
         grupos_exactos[key_tuple].append(idx)
+        
     for indices in grupos_exactos.values():
         if len(indices) > 1:
-            indices.sort(key=lambda i: processed_rows[i].get('original_row_index'))
-            indices.sort(key=lambda i: '"' in str(processed_rows[i].get(norm_key('Título'), '')), reverse=True)
-            indices.sort(key=lambda i: get_title_priority(processed_rows[i]), reverse=True)
             indices.sort(key=lambda i: get_title_cleanliness_score(processed_rows[i]))
-            for pos, idx in enumerate(indices):
-                processed_rows[idx]['Duplicada'] = SI
-                if pos > 0: mark_as_duplicate_to_delete(processed_rows[idx])
-    
-    SIMILARIDAD_MINIMA = 0.85
-    grupos_para_similitud = defaultdict(list)
+            indices.sort(key=lambda i: get_title_priority(processed_rows[i]), reverse=True)
+            indices.sort(key=lambda i: "'" in processed_rows[i]['original_titulo'] or '"' in processed_rows[i]['original_titulo'], reverse=True)
+            indices.sort(key=lambda i: (parse_date_obj(processed_rows[i].get(norm_key('Fecha'))), parse_time_obj(processed_rows[i].get(norm_key('Hora')))), reverse=True)
+            winner_idx = indices[0]
+            winner_id = str(processed_rows[winner_idx].get(norm_key('ID Noticia'), ''))
+            processed_rows[winner_idx]['Duplicada'] = SI
+            for loser_idx in indices[1:]:
+                mark_as_duplicate_to_delete(processed_rows[loser_idx])
+                processed_rows[loser_idx]['Duplicada'] = SI
+                processed_rows[loser_idx]['ID Fila Conservada'] = winner_id
+
+    final_clusters = []
+    candidates_indices = []
     for idx, row in enumerate(processed_rows):
         if row['Duplicada'] == NO and row['Mantener'] == CONSERVAR:
-            key_tuple = (norm_key(row.get(norm_key('Medio'))), norm_key(row.get(norm_key('Menciones - Empresa'))), format_date(row.get(norm_key('Fecha'))))
-            if not es_internet(row): key_tuple += (str(row.get(norm_key('Hora'))),)
-            grupos_para_similitud[key_tuple].append(idx)
-    for group in grupos_para_similitud.values():
-        if len(group) < 2: continue
-        parent = {i: i for i in group}
-        def find(x):
-            if parent[x] == x: return x
-            parent[x] = find(parent[x])
-            return parent[x]
-        def union(x, y):
-            rx, ry = find(x), find(y)
-            if rx != ry: parent[ry] = rx
-        for i in range(len(group)):
-            for j in range(i + 1, len(group)):
-                idx_i, idx_j = group[i], group[j]
-                title_i, title_j = normalize_title(processed_rows[idx_i].get(norm_key('Título'))), normalize_title(processed_rows[idx_j].get(norm_key('Título')))
-                if (title_i and title_j and SequenceMatcher(None, title_i, title_j).ratio() >= SIMILARIDAD_MINIMA):
-                    union(idx_i, idx_j)
-        clusters = defaultdict(list)
-        for i in group: clusters[find(i)].append(i)
-        for cluster in clusters.values():
-            if len(cluster) > 1:
-                cluster.sort(key=lambda i: (parse_date_obj(processed_rows[i].get(norm_key('Fecha'))), parse_time_obj(processed_rows[i].get(norm_key('Hora')))), reverse=True)
-                cluster.sort(key=lambda i: '"' in str(processed_rows[i].get(norm_key('Título'), '')), reverse=True)
-                cluster.sort(key=lambda i: get_title_priority(processed_rows[i]), reverse=True)
-                cluster.sort(key=lambda i: get_title_cleanliness_score(processed_rows[i]))
-                for pos, idx in enumerate(cluster):
-                    processed_rows[idx]['Posible Duplicada'] = SI
-                    if pos > 0 and processed_rows[idx]['Mantener'] != ELIMINAR:
-                        mark_as_duplicate_to_delete(processed_rows[idx])
-    
-    final_order = [
-        "ID Noticia", "Fecha", "Hora", "Medio", "Tipo de Medio", "Sección - Programa", "Región",
-        "Título", "Autor - Conductor", "Nro. Pagina", "Dimensión", "Duración - Nro. Caracteres", 
-        "CPE", "Tier", "Audiencia", "Tono", "Tema", "Temas Generales - Tema", 
-        "Resumen - Aclaracion", "Link Nota", "Link (Streaming - Imagen)", "Menciones - Empresa", 
-        "Duplicada", "Posible Duplicada", "Mantener"
-    ]
+            candidates_indices.append(idx)
+    for idx in candidates_indices:
+        row_i = processed_rows[idx]
+        found_cluster = False
+        for cluster in final_clusters:
+            representative_idx = cluster[0]
+            row_j = processed_rows[representative_idx]
+            if es_internet(row_i) != es_internet(row_j): continue
+            if are_rows_similar(row_i, row_j):
+                cluster.append(idx)
+                found_cluster = True
+                break
+        if not found_cluster:
+            final_clusters.append([idx])
+            
+    for cluster in final_clusters:
+        if len(cluster) > 1:
+            cluster.sort(key=lambda i: get_title_cleanliness_score(processed_rows[i]))
+            cluster.sort(key=lambda i: get_title_priority(processed_rows[i]), reverse=True)
+            cluster.sort(key=lambda i: "'" in processed_rows[i]['original_titulo'] or '"' in processed_rows[i]['original_titulo'], reverse=True)
+            cluster.sort(key=lambda i: (parse_date_obj(processed_rows[i].get(norm_key('Fecha'))), parse_time_obj(processed_rows[i].get(norm_key('Hora')))), reverse=True)
+            winner_idx = cluster[0]
+            winner_id = str(processed_rows[winner_idx].get(norm_key('ID Noticia'), ''))
+            processed_rows[winner_idx]['Posible Duplicada'] = SI
+            for loser_idx in cluster[1:]:
+                if processed_rows[loser_idx]['Mantener'] != ELIMINAR:
+                    mark_as_duplicate_to_delete(processed_rows[loser_idx])
+                processed_rows[loser_idx]['Posible Duplicada'] = SI
+                processed_rows[loser_idx]['ID Fila Conservada'] = winner_id
+        
+    final_order = ["ID Noticia", "Fecha", "Hora", "Medio", "Tipo de Medio", "Sección - Programa", "Región", "Título", "Autor - Conductor", "Nro. Pagina", "Dimensión", "Duración - Nro. Caracteres", "CPE", "Tier", "Audiencia", "Tono", "Tema", "Temas Generales - Tema", "Resumen - Aclaracion", "Link Nota", "Link (Streaming - Imagen)", "Menciones - Empresa", "Duplicada", "Posible Duplicada", "Mantener", "ID Fila Conservada"]
     main_wb = openpyxl.Workbook()
     main_sheet = main_wb.active
     main_sheet.title = "Resultado"
     main_sheet.append(final_order)
-    if "CustomLink" not in main_wb.named_styles: 
-        main_wb.add_named_style(custom_link_style)
+    if "CustomLink" not in main_wb.named_styles: main_wb.add_named_style(custom_link_style)
     nissan_wb = openpyxl.Workbook()
     nissan_sheet = nissan_wb.active
     nissan_sheet.title = "Resumen Concatenado"
@@ -270,21 +283,17 @@ def run_deduplication_process(wb, internet_dict, region_dict): # <-- Se elimina 
         main_sheet.append(new_row_to_append)
     link_nota_idx = final_order.index("Link Nota")
     link_streaming_idx = final_order.index("Link (Streaming - Imagen)")
-    for i, row_cells in enumerate(main_sheet.iter_rows(min_row=2)):
-        if i < len(processed_rows):
-            processed = processed_rows[i]
-            link_data = processed.get(norm_key("Link Nota"))
-            if isinstance(link_data, dict) and link_data.get("url"):
-                cell = row_cells[link_nota_idx]
-                cell.hyperlink = link_data["url"]
-                cell.value = "Link"
-                cell.style = "CustomLink"
-            link_data_stream = processed.get(norm_key("Link (Streaming - Imagen)"))
-            if isinstance(link_data_stream, dict) and link_data_stream.get("url"):
-                cell = row_cells[link_streaming_idx]
-                cell.hyperlink = link_data_stream["url"]
-                cell.value = "Link"
-                cell.style = "CustomLink"
+    sorted_indices = sorted(range(len(processed_rows)), key=lambda k: processed_rows[k].get('original_row_index', 0))
+    for row_idx_in_sheet, original_idx in enumerate(sorted_indices, start=2):
+        processed = processed_rows[original_idx]
+        link_data = processed.get(norm_key("Link Nota"))
+        if isinstance(link_data, dict) and link_data.get("url"):
+            cell = main_sheet.cell(row=row_idx_in_sheet, column=link_nota_idx + 1)
+            cell.hyperlink = link_data["url"]; cell.value = "Link"; cell.style = "CustomLink"
+        link_data_stream = processed.get(norm_key("Link (Streaming - Imagen)"))
+        if isinstance(link_data_stream, dict) and link_data_stream.get("url"):
+            cell = main_sheet.cell(row=row_idx_in_sheet, column=link_streaming_idx + 1)
+            cell.hyperlink = link_data_stream["url"]; cell.value = "Link"; cell.style = "CustomLink"
     summary = {
         "total_rows": len(processed_rows),
         "to_eliminate": sum(1 for r in processed_rows if r['Mantener'] == ELIMINAR),

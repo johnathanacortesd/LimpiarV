@@ -9,11 +9,11 @@ import datetime
 from copy import deepcopy
 import html
 
-# --- CONSTANTES Y FUNCIONES AUXILIARES (Reincorporando mejoras de robustez) ---
+# --- CONSTANTES Y FUNCIONES AUXILIARES (Sin cambios) ---
 CONSERVAR = "Conservar"
 ELIMINAR = "Eliminar"
 SI = "Sí"
-NO = "FALSE" # Manteniendo el "FALSE" del código original para consistencia
+NO = "FALSE"
 TONO_DUPLICADA = "Duplicada"
 TEMA_VACIO = "-"
 
@@ -71,7 +71,6 @@ def parse_date_obj(date_val):
     return datetime.datetime.min
 
 def parse_time_obj(time_val):
-    """Convierte de forma segura un valor de hora a un objeto datetime.time."""
     if isinstance(time_val, datetime.time): return time_val
     if isinstance(time_val, datetime.datetime): return time_val.time()
     if isinstance(time_val, str):
@@ -108,10 +107,8 @@ def get_title_cleanliness_score(row):
     cleaned_title = str(row.get(norm_key('Título'), ''))
     return 0 if original_title == cleaned_title else 1
 
-# --- FUNCIÓN PRINCIPAL ---
-def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
-    # ... (FASE 1 a 6 permanecen idénticas al código que proporcionaste)
-    # ... (Por brevedad, se omite el código que no cambia)
+# --- FUNCIÓN PRINCIPAL (MODIFICADA) ---
+def run_deduplication_process(wb, internet_dict, region_dict): # <-- Se elimina empresa_dict
     sheet = wb.active
     custom_link_style = NamedStyle(name="CustomLink", 
                                  font=Font(color="0000FF", underline="single"), 
@@ -121,6 +118,7 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
     headers = [cell.value for cell in sheet[1]]
     headers_norm = [norm_key(h) for h in headers]
     processed_rows = []
+    
     # --- FASE 1: EXPANSIÓN POR MENCIONES Y LIMPIEZA INICIAL ---
     for row_idx, row_cells in enumerate(sheet.iter_rows(min_row=2)):
         if all(c.value is None for c in row_cells): continue
@@ -153,17 +151,23 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
             if is_link_nota_empty and has_streaming_link: base_data[link_nota_key] = base_data.get(link_streaming_key)
             base_data[link_streaming_key] = None
         elif tipo_medio_val in {"Radio", "Televisión"}: base_data[link_streaming_key] = None
+        
+        # <<< INICIO DE LA MODIFICACIÓN: Eliminación del mapeo de empresas >>>
         menciones_key = norm_key('Menciones - Empresa')
         menciones_str = str(base_data.get(menciones_key) or '')
         menciones = [m.strip() for m in menciones_str.split(';') if m.strip()]
-        if not menciones: processed_rows.append(base_data)
+        
+        if not menciones: 
+            processed_rows.append(base_data)
         else:
             for mencion in menciones:
                 new_row = deepcopy(base_data)
-                mencion_limpia = mencion.lower().strip()
-                new_row[menciones_key] = empresa_dict.get(mencion_limpia, mencion)
+                # Ya no se mapea el nombre, simplemente se asigna la mención de la iteración.
+                new_row[menciones_key] = mencion 
                 processed_rows.append(new_row)
-    # --- FASE 2: APLICAR MAPEOS DE INTERNET Y REGIÓN ---
+        # <<< FIN DE LA MODIFICACIÓN >>>
+
+    # --- FASE 2 a 7 (Sin cambios en su lógica interna) ---
     medio_key, tipo_medio_key, region_key = norm_key('Medio'), norm_key('Tipo de Medio'), norm_key('Región')
     for row in processed_rows:
         if str(row.get(tipo_medio_key, '')).lower().strip() == 'internet':
@@ -171,15 +175,15 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
             if medio_val in internet_dict: row[medio_key] = internet_dict[medio_val]
         medio_actual_val = str(row.get(medio_key, '')).lower().strip()
         row[region_key] = region_dict.get(medio_actual_val, "Online")
-    # --- FASE 3: INICIALIZAR CAMPOS DE DEDUPLICACIÓN ---
+    
     for row in processed_rows:
         row.update({'Duplicada': NO, 'Posible Duplicada': NO, 'Mantener': CONSERVAR})
-    # --- FASE 4: MARCAR TÍTULOS PROBLEMÁTICOS ---
+    
     for row in processed_rows:
         if is_title_problematic(row.get(norm_key('Título'))):
             row['Duplicada'] = SI
             mark_as_duplicate_to_delete(row)
-    # --- FASE 5: DETECTAR DUPLICADOS EXACTOS ---
+    
     grupos_exactos = defaultdict(list)
     for idx, row in enumerate(processed_rows):
         if row['Mantener'] == ELIMINAR: continue
@@ -195,7 +199,7 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
             for pos, idx in enumerate(indices):
                 processed_rows[idx]['Duplicada'] = SI
                 if pos > 0: mark_as_duplicate_to_delete(processed_rows[idx])
-    # --- FASE 6: DETECTAR DUPLICADOS POR SIMILITUD ---
+    
     SIMILARIDAD_MINIMA = 0.85
     grupos_para_similitud = defaultdict(list)
     for idx, row in enumerate(processed_rows):
@@ -232,7 +236,6 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
                     if pos > 0 and processed_rows[idx]['Mantener'] != ELIMINAR:
                         mark_as_duplicate_to_delete(processed_rows[idx])
     
-    # --- FASE 7: GENERACIÓN DEL REPORTE FINAL ---
     final_order = [
         "ID Noticia", "Fecha", "Hora", "Medio", "Tipo de Medio", "Sección - Programa", "Región",
         "Título", "Autor - Conductor", "Nro. Pagina", "Dimensión", "Duración - Nro. Caracteres", 
@@ -240,51 +243,33 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
         "Resumen - Aclaracion", "Link Nota", "Link (Streaming - Imagen)", "Menciones - Empresa", 
         "Duplicada", "Posible Duplicada", "Mantener"
     ]
-    
-    # Libro de trabajo principal
     main_wb = openpyxl.Workbook()
     main_sheet = main_wb.active
     main_sheet.title = "Resultado"
     main_sheet.append(final_order)
     if "CustomLink" not in main_wb.named_styles: 
         main_wb.add_named_style(custom_link_style)
-
-    # <<< --- INICIO DEL CAMBIO --- >>>
-    # Libro de trabajo para Nissan Test
     nissan_wb = openpyxl.Workbook()
     nissan_sheet = nissan_wb.active
     nissan_sheet.title = "Resumen Concatenado"
-    nissan_sheet.append(["Resumen"]) # Columna requerida
-    # <<< --- FIN DEL CAMBIO --- >>>
-
+    nissan_sheet.append(["Resumen"])
     processed_rows.sort(key=lambda r: r.get('original_row_index', 0))
-
-    # Bucle principal para poblar los archivos
     for row_data in processed_rows:
         if row_data['Mantener'] == CONSERVAR:
             titulo_key = norm_key('Título')
             title = str(row_data.get(titulo_key, ''))
             title = re.sub(r'\s*\|\s*[\w\s]+$', '', title).strip()
             row_data[titulo_key] = title
-
-            # <<< --- INICIO DEL CAMBIO --- >>>
-            # Lógica para el archivo Nissan Test
             resumen_aclaracion = str(row_data.get(norm_key('Resumen - Aclaracion'), ''))
             concatenated_summary = f"{title} {resumen_aclaracion}".strip()
             nissan_sheet.append([concatenated_summary])
-            # <<< --- FIN DEL CAMBIO --- >>>
-
-        # Lógica para el archivo principal (corregida para evitar errores)
         new_row_to_append = []
         for header in final_order:
             val = row_data.get(norm_key(header), row_data.get(header, None))
             new_row_to_append.append(val.get('value') if isinstance(val, dict) else val)
         main_sheet.append(new_row_to_append)
-    
-    # Agregar hipervínculos al archivo principal
     link_nota_idx = final_order.index("Link Nota")
     link_streaming_idx = final_order.index("Link (Streaming - Imagen)")
-    
     for i, row_cells in enumerate(main_sheet.iter_rows(min_row=2)):
         if i < len(processed_rows):
             processed = processed_rows[i]
@@ -294,18 +279,12 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
                 cell.hyperlink = link_data["url"]
                 cell.value = "Link"
                 cell.style = "CustomLink"
-            
             link_data_stream = processed.get(norm_key("Link (Streaming - Imagen)"))
             if isinstance(link_data_stream, dict) and link_data_stream.get("url"):
                 cell = row_cells[link_streaming_idx]
                 cell.hyperlink = link_data_stream["url"]
                 cell.value = "Link"
                 cell.style = "CustomLink"
-
-    # Eliminar la hoja original si es necesario (generalmente no se hace en este flujo)
-    # if wb.active in wb.worksheets: wb.remove(wb.active) # Comentado por seguridad
-    
-    # Calcular resumen
     summary = {
         "total_rows": len(processed_rows),
         "to_eliminate": sum(1 for r in processed_rows if r['Mantener'] == ELIMINAR),
@@ -313,8 +292,4 @@ def run_deduplication_process(wb, empresa_dict, internet_dict, region_dict):
         "exact_duplicates": sum(1 for r in processed_rows if r['Duplicada'] == SI),
         "possible_duplicates": sum(1 for r in processed_rows if r['Posible Duplicada'] == SI and r['Duplicada'] == NO)
     }
-    
-    # <<< --- INICIO DEL CAMBIO --- >>>
-    # Devolver ambos libros de trabajo
     return main_wb, nissan_wb, summary
-    # <<< --- FIN DEL CAMBIO --- >>>

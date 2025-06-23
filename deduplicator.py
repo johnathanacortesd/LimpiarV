@@ -132,9 +132,7 @@ def are_rows_similar(row_i, row_j):
 
 def run_deduplication_process(wb, internet_dict, region_dict):
     sheet = wb.active
-    custom_link_style = NamedStyle(name="CustomLink",
-                                   font=Font(color="0000FF", underline="single"),
-                                   alignment=Alignment(horizontal="left"))
+    custom_link_style = NamedStyle(name="CustomLink", font=Font(color="0000FF", underline="single"), alignment=Alignment(horizontal="left"))
     if "CustomLink" not in wb.named_styles:
         wb.add_named_style(custom_link_style)
     headers = [cell.value for cell in sheet[1]]
@@ -167,7 +165,7 @@ def run_deduplication_process(wb, internet_dict, region_dict):
         if tipo_medio_val == "Internet":
             base_data[link_nota_key], base_data[link_streaming_key] = (base_data.get(link_streaming_key), base_data.get(link_nota_key))
         elif tipo_medio_val in {"Prensa", "Revista"}:
-            is_link_nota_empty = (not base_data.get(link_nota_key) or not base_data.get(link_nota_key, {}).get('url'))
+            is_link_nota_empty = not base_data.get(link_nota_key) or not base_data.get(link_nota_key, {}).get('url')
             has_streaming_link = base_data.get(link_streaming_key, {}).get('url')
             if is_link_nota_empty and has_streaming_link: base_data[link_nota_key] = base_data.get(link_streaming_key)
             base_data[link_streaming_key] = None
@@ -181,7 +179,6 @@ def run_deduplication_process(wb, internet_dict, region_dict):
         else:
             for mencion in menciones:
                 new_row = deepcopy(base_data)
-                # Ya no se usa el mapeo de empresas, se usa la mención tal cual.
                 new_row[menciones_key] = mencion
                 processed_rows.append(new_row)
 
@@ -267,38 +264,50 @@ def run_deduplication_process(wb, internet_dict, region_dict):
     nissan_sheet.title = "Resumen Concatenado"
     nissan_sheet.append(["Resumen"])
     processed_rows.sort(key=lambda r: r.get('original_row_index', 0))
+    
+    id_noticia_key = norm_key("ID Noticia")
+    mantener_key = norm_key("Mantener")
+    titulo_key = norm_key("Título")
+    resumen_key = norm_key("Resumen - Aclaracion")
+    
     for row_data in processed_rows:
-        if row_data['Mantener'] == CONSERVAR:
-            titulo_key = norm_key('Título')
+        if row_data.get(mantener_key, row_data.get('Mantener')) == CONSERVAR:
             title = str(row_data.get(titulo_key, ''))
             title = re.sub(r'\s*\|\s*[\w\s]+$', '', title).strip()
             row_data[titulo_key] = title
-            resumen_aclaracion = str(row_data.get(norm_key('Resumen - Aclaracion'), ''))
+            resumen_aclaracion = str(row_data.get(resumen_key, ''))
             concatenated_summary = f"{title} {resumen_aclaracion}".strip()
             nissan_sheet.append([concatenated_summary])
+        
         new_row_to_append = []
         for header in final_order:
             val = row_data.get(norm_key(header), row_data.get(header, None))
             new_row_to_append.append(val.get('value') if isinstance(val, dict) else val)
         main_sheet.append(new_row_to_append)
+        
     link_nota_idx = final_order.index("Link Nota")
     link_streaming_idx = final_order.index("Link (Streaming - Imagen)")
-    sorted_indices = sorted(range(len(processed_rows)), key=lambda k: processed_rows[k].get('original_row_index', 0))
-    for row_idx_in_sheet, original_idx in enumerate(sorted_indices, start=2):
-        processed = processed_rows[original_idx]
+    
+    row_map = {row.get('original_row_index'): row for row in processed_rows}
+    for i, sheet_row in enumerate(main_sheet.iter_rows(min_row=2)):
+        original_idx = sorted(row_map.keys())[i]
+        processed = row_map[original_idx]
+        
         link_data = processed.get(norm_key("Link Nota"))
         if isinstance(link_data, dict) and link_data.get("url"):
-            cell = main_sheet.cell(row=row_idx_in_sheet, column=link_nota_idx + 1)
+            cell = sheet_row[link_nota_idx]
             cell.hyperlink = link_data["url"]; cell.value = "Link"; cell.style = "CustomLink"
+            
         link_data_stream = processed.get(norm_key("Link (Streaming - Imagen)"))
         if isinstance(link_data_stream, dict) and link_data_stream.get("url"):
-            cell = main_sheet.cell(row=row_idx_in_sheet, column=link_streaming_idx + 1)
+            cell = sheet_row[link_streaming_idx]
             cell.hyperlink = link_data_stream["url"]; cell.value = "Link"; cell.style = "CustomLink"
+
     summary = {
         "total_rows": len(processed_rows),
-        "to_eliminate": sum(1 for r in processed_rows if r['Mantener'] == ELIMINAR),
-        "to_conserve": len(processed_rows) - sum(1 for r in processed_rows if r['Mantener'] == ELIMINAR),
-        "exact_duplicates": sum(1 for r in processed_rows if r['Duplicada'] == SI),
-        "possible_duplicates": sum(1 for r in processed_rows if r['Posible Duplicada'] == SI and r['Duplicada'] == NO)
+        "to_eliminate": sum(1 for r in processed_rows if r.get(mantener_key, r.get('Mantener')) == ELIMINAR),
+        "to_conserve": len(processed_rows) - sum(1 for r in processed_rows if r.get(mantener_key, r.get('Mantener')) == ELIMINAR),
+        "exact_duplicates": sum(1 for r in processed_rows if r.get('Duplicada') == SI),
+        "possible_duplicates": sum(1 for r in processed_rows if r.get('Posible Duplicada') == SI and r.get('Duplicada') == NO)
     }
     return main_wb, nissan_wb, summary

@@ -7,7 +7,7 @@ import datetime
 import pandas as pd
 import openai
 import numpy as np
-from openpyxl.styles import Alignment # Importación necesaria para el formato de celda
+from openpyxl.styles import Alignment 
 from sklearn.metrics.pairwise import cosine_similarity
 from unidecode import unidecode
 import re
@@ -41,7 +41,7 @@ def check_password():
         return False
     return True
 
-# --- CLASES DE ANÁLISIS DE IA (Con corrección de nomenclatura) ---
+# --- CLASES DE ANÁLISIS DE IA (Sin cambios) ---
 class ClasificadorTonoNoticias:
     def __init__(self, marca, client_openai):
         self.marca=marca; self.client=client_openai; self.embeddings_cache={}; self.tonos_asignados_cache={}; self.grupos_similares_info={}
@@ -287,20 +287,21 @@ if check_password():
     st.caption("Una herramienta inteligente para mapear, limpiar, deduplicar y analizar tus informes con precisión.")
     st.divider()
 
+    # <<< INICIO DE LA MODIFICACIÓN: Eliminación del mapeo de empresas >>>
     with st.sidebar:
         st.header("📂 Paso 1: Carga y Depuración")
         uploaded_main_file = st.file_uploader("1. Informe Principal de Noticias", type="xlsx", key="main_file")
         uploaded_internet_map = st.file_uploader("2. Mapeo de Medios de Internet", type="xlsx", key="internet_map")
         uploaded_region_map = st.file_uploader("3. Mapeo de Regiones", type="xlsx", key="region_map")
-        uploaded_empresa_map = st.file_uploader("4. Mapeo de Nombres de Empresas", type="xlsx", key="empresa_map")
+        # El cargador de Mapeo de Empresas ha sido eliminado.
         st.divider()
         process_button = st.button("🚀 Analizar y Depurar Archivos", type="primary", use_container_width=True)
 
     if 'deduplication_complete' not in st.session_state: st.session_state.deduplication_complete = False
     if 'ai_analysis_complete' not in st.session_state: st.session_state.ai_analysis_complete = False
 
-    all_files_uploaded = (uploaded_main_file and uploaded_internet_map and 
-                          uploaded_region_map and uploaded_empresa_map)
+    # La comprobación ahora es para 3 archivos en lugar de 4.
+    all_files_uploaded = (uploaded_main_file and uploaded_internet_map and uploaded_region_map)
 
     if process_button:
         st.session_state.deduplication_complete = False
@@ -312,9 +313,11 @@ if check_password():
                     wb_main = openpyxl.load_workbook(uploaded_main_file)
                     internet_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_internet_map, data_only=True).active.iter_rows(min_row=2) if r[0].value and r[1].value}
                     region_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_region_map, data_only=True).active.iter_rows(min_row=2) if r[0].value and r[1].value}
-                    empresa_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_empresa_map, data_only=True).active.iter_rows(min_row=2) if r[0].value and r[1].value}
+                    
                     status.write("🧠 Ejecutando deduplicación...")
-                    final_wb, nissan_wb, summary = run_deduplication_process(wb_main, empresa_dict, internet_dict, region_dict)
+                    # La llamada a la función ya no pasa el diccionario de empresas.
+                    final_wb, nissan_wb, summary = run_deduplication_process(wb_main, internet_dict, region_dict)
+                    
                     status.update(label="✅ ¡Deduplicación completada!", state="complete", expanded=False)
                     st.session_state.summary = summary
                     main_stream = io.BytesIO()
@@ -330,7 +333,9 @@ if check_password():
                     st.exception(e)
                     st.session_state.deduplication_complete = False
         else:
-            st.warning("⚠️ Por favor, asegúrate de cargar los cuatro archivos requeridos.")
+            # Mensaje de advertencia actualizado para 3 archivos.
+            st.warning("⚠️ Por favor, asegúrate de cargar los tres archivos requeridos.")
+    # <<< FIN DE LA MODIFICACIÓN >>>
 
     if st.session_state.deduplication_complete:
         st.header("Resultados de la Deduplicación")
@@ -393,27 +398,18 @@ if check_password():
                             resumen_texto = generar_resumen_estrategico(client, df_final_completo, marca)
                             st.session_state.resumen_ejecutivo = resumen_texto
                             status.update(label="¡Análisis IA completado!", state="complete", expanded=False)
-
-                        # <<< INICIO DE LA MODIFICACIÓN PARA AÑADIR LA SEGUNDA PESTAÑA >>>
                         output_stream = io.BytesIO()
                         with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
-                            # Pestaña 1: Los datos completos
                             df_final_completo.to_excel(writer, index=False, sheet_name='Resultados_IA')
-
-                            # Pestaña 2: El resumen ejecutivo
                             if 'resumen_ejecutivo' in st.session_state and st.session_state.resumen_ejecutivo:
                                 resumen_texto = st.session_state.resumen_ejecutivo
                                 summary_df = pd.DataFrame({'Diagnostico General': [resumen_texto]})
                                 summary_df.to_excel(writer, index=False, sheet_name='Diagnostico_General')
-                                
-                                # Formatear la celda del resumen para mejor legibilidad
                                 worksheet = writer.sheets['Diagnostico_General']
                                 worksheet.column_dimensions['A'].width = 120
                                 cell = worksheet['A2']
                                 cell.alignment = Alignment(wrap_text=True, vertical='top')
-                        
                         st.session_state.ai_analyzed_stream = output_stream
-                        # <<< FIN DE LA MODIFICACIÓN >>>
                         st.session_state.ai_analysis_complete = True
                         st.balloons()
                 except openai.AuthenticationError:

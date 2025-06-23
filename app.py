@@ -17,7 +17,7 @@ from deduplicator import run_deduplication_process
 # --- Configuración de la página ---
 st.set_page_config(page_title="Intelli-Clean | Depurador y Analizador IA", page_icon="🤖", layout="wide", initial_sidebar_state="expanded")
 
-# --- Autenticación (sin cambios) ---
+# --- Autenticación ---
 def check_password():
     def password_entered():
         try:
@@ -40,7 +40,7 @@ def check_password():
         return False
     return True
 
-# --- CLASES DE ANÁLISIS DE IA (INTEGRADAS, SIN CAMBIOS) ---
+# --- CLASES DE ANÁLISIS DE IA (CON CORRECCIÓN DE NOMENCLATURA) ---
 class ClasificadorTonoNoticias:
     def __init__(self, marca, client_openai):
         self.marca=marca; self.client=client_openai; self.embeddings_cache={}; self.tonos_asignados_cache={}; self.grupos_similares_info={}
@@ -96,7 +96,8 @@ class ClasificadorTonoNoticias:
     def procesar_dataframe(self, df, columna_texto):
         df.columns = [unidecode(col.strip().lower()).replace(' ', '') for col in df.columns]
         if columna_texto not in df.columns: st.error(f"Error interno: La columna '{columna_texto}' no se encuentra en el dataframe procesado."); return df
-        df['Tono']="No Procesado"
+        # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula desde la creación >>>
+        df['tono']="No Procesado"
         total_rows=len(df)
         status_text = st.empty()
         with st.spinner("Analizando Tono..."):
@@ -104,14 +105,18 @@ class ClasificadorTonoNoticias:
             item_to_rep_map=self.detectar_grupos_similares(df, embeddings_list)
             for idx in range(total_rows):
                 status_text.text(f"Analizando Tono: Fila {idx+1}/{total_rows}")
-                if df.at[idx, 'Tono'] != "No Procesado": continue
+                # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula para la comprobación >>>
+                if df.at[idx, 'tono'] != "No Procesado": continue
                 if idx in item_to_rep_map:
                     rep_idx=item_to_rep_map[idx]
                     if self.grupos_similares_info[rep_idx]['tono'] is None:
                         tono_rep=self.clasificar_tono_noticia_gpt(df.iloc[rep_idx][columna_texto])
                         self.grupos_similares_info[rep_idx]['tono']=tono_rep
-                    df.at[idx, 'Tono']=self.grupos_similares_info[rep_idx]['tono']
-                else: df.at[idx, 'Tono']=self.clasificar_tono_noticia_gpt(df.iloc[idx][columna_texto])
+                    # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula para la asignación >>>
+                    df.at[idx, 'tono']=self.grupos_similares_info[rep_idx]['tono']
+                else: 
+                    # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula para la asignación >>>
+                    df.at[idx, 'tono']=self.clasificar_tono_noticia_gpt(df.iloc[idx][columna_texto])
         status_text.empty()
         return df
 
@@ -203,7 +208,8 @@ class ClasificadorTemasAvanzado:
     def procesar_dataframe(self, df, columna_texto):
         df.columns = [unidecode(col.strip().lower()).replace(' ', '') for col in df.columns]
         if columna_texto not in df.columns: st.error(f"Error interno: La columna '{columna_texto}' no se encuentra en el dataframe procesado."); return df
-        df['Tema'] = "No Procesado"
+        # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula desde la creación >>>
+        df['tema'] = "No Procesado"
         total_rows = len(df)
         status_text = st.empty()
         with st.spinner("Analizando Temas con IA Avanzada..."):
@@ -218,48 +224,45 @@ class ClasificadorTemasAvanzado:
                     all_keywords = [kw for texto in textos_cluster for kw in self.extraer_keywords_clave(texto)]
                     top_keywords = [kw for kw, freq in Counter(all_keywords).most_common(10)]
                     tema_cluster = self.generar_tema_inteligente(textos_cluster, top_keywords)
-                    for idx in indices: df.at[idx, 'Tema'] = tema_cluster
-                elif indices: # Es un cluster individual
+                    # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula para la asignación >>>
+                    for idx in indices: df.at[idx, 'tema'] = tema_cluster
+                elif indices:
                     idx = indices[0]
                     texto = df.iloc[idx][columna_texto]
-                    df.at[idx, 'Tema'] = self.generar_tema_individual(texto)
-            elementos_sin_tema = df[df['Tema'] == "No Procesado"]
+                    # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula para la asignación >>>
+                    df.at[idx, 'tema'] = self.generar_tema_individual(texto)
+            # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula para la comprobación >>>
+            elementos_sin_tema = df[df['tema'] == "No Procesado"]
             if not elementos_sin_tema.empty:
                 for idx in elementos_sin_tema.index:
                     texto = df.iloc[idx][columna_texto]
-                    df.at[idx, 'Tema'] = self.generar_tema_individual(texto)
+                    # <<< CORRECCIÓN FUNDAMENTAL: Usar minúscula para la asignación >>>
+                    df.at[idx, 'tema'] = self.generar_tema_individual(texto)
         status_text.empty()
         return df
 
-# --- NUEVA FUNCIÓN PARA GENERAR RESUMEN EJECUTIVO ---
+# --- FUNCIÓN PARA GENERAR RESUMEN EJECUTIVO ---
 def generar_resumen_estrategico(client, df, marca_analizada):
     datos_contexto = ""
-    
     volumen_total = len(df)
     dist_tono = df['Tono_IA'].value_counts().to_string().replace('\n', ', ')
     datos_contexto += f"- Diagnóstico General: {volumen_total} menciones analizadas. Distribución de tono: {dist_tono}.\n"
-
     top_temas = df['Tema_IA'].value_counts().nlargest(5).to_string().replace('\n', ', ')
     datos_contexto += f"- Temas Principales: {top_temas}.\n"
-
-    # Buscar columnas de KPI de forma robusta
     col_audiencia, col_cpe = None, None
     for col in df.columns:
         if 'audiencia' in col.lower(): col_audiencia = col
         if 'cpe' in col.lower(): col_cpe = col
-
     if col_audiencia:
         riesgos = df[df['Tono_IA'] == 'Negativo'].nlargest(3, col_audiencia)[['Tema_IA', col_audiencia]].copy()
         if not riesgos.empty:
             riesgos[col_audiencia] = riesgos[col_audiencia].apply(lambda x: f"{x:,.0f}")
             datos_contexto += f"- Riesgos Potenciales (Temas Negativos con Mayor Audiencia):\n{riesgos.to_string(index=False)}\n"
-    
     if col_cpe:
         riesgos_cpe = df[df['Tono_IA'] == 'Negativo'].nlargest(3, col_cpe)[['Tema_IA', col_cpe]].copy()
         if not riesgos_cpe.empty:
              riesgos_cpe[col_cpe] = riesgos_cpe[col_cpe].apply(lambda x: f"${x:,.0f}")
              datos_contexto += f"- Riesgos Potenciales (Temas Negativos con Mayor CPE):\n{riesgos_cpe.to_string(index=False)}\n"
-
     prompt_final = f"""
     A partir de los siguientes datos resumidos sobre la presencia mediática de "{marca_analizada}":
     ---
@@ -272,7 +275,6 @@ def generar_resumen_estrategico(client, df, marca_analizada):
     3. **Riesgos Potenciales:** Identifica explícitamente 1-2 riesgos evidentes en los datos, por ejemplo, temas negativos con alta audiencia o costo.
     **NO INCLUYAS RECOMENDACIONES.** Limítate a diagnosticar con un lenguaje claro y directo, en formato de texto plano.
     """
-    
     try:
         response = client.chat.completions.create(
             model="gpt-4.1-mini-2025-04-14",
@@ -293,7 +295,6 @@ if check_password():
     st.caption("Una herramienta inteligente para mapear, limpiar, deduplicar y analizar tus informes con precisión.")
     st.divider()
 
-    # --- Sidebar para carga de archivos ---
     with st.sidebar:
         st.header("📂 Paso 1: Carga y Depuración")
         uploaded_main_file = st.file_uploader("1. Informe Principal de Noticias", type="xlsx", key="main_file")
@@ -303,16 +304,12 @@ if check_password():
         st.divider()
         process_button = st.button("🚀 Analizar y Depurar Archivos", type="primary", use_container_width=True)
 
-    # --- Inicialización del estado de la sesión ---
-    if 'deduplication_complete' not in st.session_state:
-        st.session_state.deduplication_complete = False
-    if 'ai_analysis_complete' not in st.session_state:
-        st.session_state.ai_analysis_complete = False
+    if 'deduplication_complete' not in st.session_state: st.session_state.deduplication_complete = False
+    if 'ai_analysis_complete' not in st.session_state: st.session_state.ai_analysis_complete = False
 
     all_files_uploaded = (uploaded_main_file and uploaded_internet_map and 
                           uploaded_region_map and uploaded_empresa_map)
 
-    # --- Lógica del botón de deduplicación ---
     if process_button:
         st.session_state.deduplication_complete = False
         st.session_state.ai_analysis_complete = False 
@@ -324,25 +321,17 @@ if check_password():
                     internet_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_internet_map, data_only=True).active.iter_rows(min_row=2) if r[0].value and r[1].value}
                     region_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_region_map, data_only=True).active.iter_rows(min_row=2) if r[0].value and r[1].value}
                     empresa_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_empresa_map, data_only=True).active.iter_rows(min_row=2) if r[0].value and r[1].value}
-
                     status.write("🧠 Ejecutando deduplicación...")
                     final_wb, nissan_wb, summary = run_deduplication_process(wb_main, empresa_dict, internet_dict, region_dict)
-                    
                     status.update(label="✅ ¡Deduplicación completada!", state="complete", expanded=False)
-
                     st.session_state.summary = summary
-                    
                     main_stream = io.BytesIO()
                     final_wb.save(main_stream)
                     st.session_state.main_stream = main_stream
-
-                    # Guardar el DataFrame depurado y el workbook de nissan para el análisis IA
                     main_stream.seek(0)
                     st.session_state.df_depurado = pd.read_excel(main_stream)
                     st.session_state.nissan_wb = nissan_wb
-                    
                     st.session_state.deduplication_complete = True
-
                 except Exception as e:
                     status.update(label="❌ Error en el proceso de deduplicación", state="error", expanded=True)
                     st.error(f"Ha ocurrido un error inesperado: {e}")
@@ -351,17 +340,14 @@ if check_password():
         else:
             st.warning("⚠️ Por favor, asegúrate de cargar los cuatro archivos requeridos.")
 
-    # --- Bloque para mostrar resultados de deduplicación y lanzar análisis IA ---
     if st.session_state.deduplication_complete:
         st.header("Resultados de la Deduplicación")
         st.subheader("📊 Resumen del Proceso")
-        
         summary = st.session_state.summary
         col1, col2, col3 = st.columns(3)
         col1.metric("Filas Totales Procesadas", summary.get('total_rows', 0))
         col2.metric("👍 Filas para Conservar", summary.get('to_conserve', 0))
         col3.metric("🗑️ Filas para Eliminar", summary.get('to_eliminate', 0))
-        
         st.download_button(
             label="1. Descargar Informe Principal Depurado", 
             data=st.session_state.main_stream.getvalue(), 
@@ -371,10 +357,8 @@ if check_password():
         )
         st.divider()
         
-        # --- SECCIÓN PARA ANÁLISIS IA ---
         st.header("🤖 Paso 2: Análisis con IA (Opcional)")
         st.info("Utiliza el poder de la IA para clasificar Tono, Tema y generar un diagnóstico estratégico.")
-
         with st.form("ai_analysis_form"):
             try:
                 api_key = st.secrets["OPENAI_API_KEY"]
@@ -382,7 +366,6 @@ if check_password():
             except (KeyError, AttributeError):
                 st.warning("No se encontraron Secrets. Ingresa la API Key manualmente.", icon="⚠️")
                 api_key = st.text_input("Ingresa tu API Key de OpenAI", type="password")
-
             marca = st.text_input("➡️ Ingresa la Marca o Cliente para el análisis", placeholder="Ej: Coca-Cola")
             ai_submit_button = st.form_submit_button("🧠 Analizar y Diagnosticar con IA", type="primary", use_container_width=True)
 
@@ -396,7 +379,6 @@ if check_password():
                     nissan_wb_obj.save(stream)
                     stream.seek(0)
                     df_for_ai = pd.read_excel(stream)
-
                     if df_for_ai.empty:
                         st.warning("No hay datos para analizar con IA (el archivo de resúmenes está vacío).")
                     else:
@@ -405,33 +387,27 @@ if check_password():
                             status.write("Clasificando Tono...")
                             clasificador_tono = ClasificadorTonoNoticias(marca, client)
                             df_con_tono = clasificador_tono.procesar_dataframe(df_for_ai.copy(), 'resumen')
-                            
                             status.write("Identificando Temas...")
                             clasificador_tema = ClasificadorTemasAvanzado(client)
                             df_analizado_ia = clasificador_tema.procesar_dataframe(df_con_tono.copy(), 'resumen')
-                            
-                            # Combinar resultados del AI con el dataframe depurado original
                             df_final_completo = st.session_state.df_depurado.copy()
                             if len(df_final_completo) == len(df_analizado_ia):
-                                df_final_completo['Tono_IA'] = df_analizado_ia['Tono'].values
-                                df_final_completo['Tema_IA'] = df_analizado_ia['Tema'].values
+                                # Con la corrección en las clases, ahora estamos seguros de que estas columnas existen y están en minúsculas.
+                                df_final_completo['Tono_IA'] = df_analizado_ia['tono'].values
+                                df_final_completo['Tema_IA'] = df_analizado_ia['tema'].values
                             else:
                                 st.error("Error: el número de filas del análisis no coincide con el informe depurado. No se puede combinar.")
                                 raise Exception("Error de coincidencia de filas.")
-
                             status.write("Generando Resumen Ejecutivo...")
                             resumen_texto = generar_resumen_estrategico(client, df_final_completo, marca)
                             st.session_state.resumen_ejecutivo = resumen_texto
-
                             status.update(label="¡Análisis IA completado!", state="complete", expanded=False)
-
                         output_stream = io.BytesIO()
                         with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
                             df_final_completo.to_excel(writer, index=False, sheet_name='Resultados_IA')
                         st.session_state.ai_analyzed_stream = output_stream
                         st.session_state.ai_analysis_complete = True
                         st.balloons()
-                
                 except openai.AuthenticationError:
                     st.error("Error de autenticación con OpenAI. Verifica que tu API Key sea correcta.")
                     st.session_state.ai_analysis_complete = False
@@ -440,24 +416,25 @@ if check_password():
                     st.exception(e)
                     st.session_state.ai_analysis_complete = False
 
-    # --- Bloque para mostrar resultados del análisis IA y Diagnóstico ---
     if st.session_state.get('ai_analysis_complete', False):
         st.header("✅ Resultados del Análisis IA")
-        
-        st.subheader("📝 Resumen Ejecutivo Estratégico")
-        st.text_area("Diagnóstico General", value=st.session_state.resumen_ejecutivo, height=250, disabled=True)
-        st.markdown("---")
+        if 'resumen_ejecutivo' in st.session_state and st.session_state.resumen_ejecutivo:
+            st.subheader("📝 Resumen Ejecutivo Estratégico")
+            resumen_value = st.session_state.get('resumen_ejecutivo', "No se pudo generar el resumen.")
+            st.text_area("Diagnóstico General", value=resumen_value, height=250, disabled=True, help="Este resumen fue generado por IA a partir de los datos analizados.")
+            st.markdown("---")
+        if 'ai_analyzed_stream' in st.session_state and st.session_state.ai_analyzed_stream:
+            st.subheader("📥 Descargar Reporte Final")
+            st.info("Este archivo contiene los datos depurados con las columnas 'Tono_IA' y 'Tema_IA' añadidas.")
+            st.download_button(
+                label="2. Descargar Reporte Completo Analizado con IA",
+                data=st.session_state.ai_analyzed_stream.getvalue(),
+                file_name=f"Reporte_Analizado_IA_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        else:
+            st.warning("El archivo final no se generó. Es posible que haya ocurrido un error durante el análisis.")
 
-        st.subheader("📥 Descargar Reporte Final")
-        st.info("Este archivo contiene los datos depurados con las columnas 'Tono_IA' y 'Tema_IA' añadidas.")
-        st.download_button(
-            label="2. Descargar Reporte Completo Analizado con IA",
-            data=st.session_state.ai_analyzed_stream.getvalue(),
-            file_name=f"Reporte_Analizado_IA_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-
-    # --- Mensaje inicial ---
-    elif not st.session_state.deduplication_complete and not process_button:
+    elif not st.session_state.get('deduplication_complete', False) and not process_button:
         st.info("Carga los archivos en el menú de la izquierda y haz clic en 'Analizar y Depurar' para comenzar.")

@@ -37,11 +37,11 @@ def check_password():
             st.markdown("<h3 style='text-align: center;'>Intelli-Clean Access</h3>", unsafe_allow_html=True)
             st.text_input("Contraseña", type="password", on_change=password_entered, key="password", placeholder="Introduce la contraseña", label_visibility="collapsed")
             if 'password' in st.session_state and st.session_state.password != "" and not st.session_state.password_correct:
-                 st.error("😕 Contraseña incorrecta.")
+                   st.error("😕 Contraseña incorrecta.")
         return False
     return True
 
-# --- CLASES DE ANÁLISIS DE IA (Sin cambios) ---
+# --- CLASES DE ANÁLISIS DE IA ---
 class ClasificadorTonoNoticias:
     def __init__(self, marca, client_openai):
         self.marca=marca; self.client=client_openai; self.embeddings_cache={}; self.tonos_asignados_cache={}; self.grupos_similares_info={}
@@ -253,8 +253,8 @@ def generar_resumen_estrategico(client, df, marca_analizada):
     if col_cpe:
         riesgos_cpe = df[df['Tono_IA'] == 'Negativo'].nlargest(3, col_cpe)[['Tema_IA', col_cpe]].copy()
         if not riesgos_cpe.empty:
-             riesgos_cpe[col_cpe] = riesgos_cpe[col_cpe].apply(lambda x: f"${x:,.0f}")
-             datos_contexto += f"- Riesgos Potenciales (Temas Negativos con Mayor CPE):\n{riesgos_cpe.to_string(index=False)}\n"
+                 riesgos_cpe[col_cpe] = riesgos_cpe[col_cpe].apply(lambda x: f"${x:,.0f}")
+                 datos_contexto += f"- Riesgos Potenciales (Temas Negativos con Mayor CPE):\n{riesgos_cpe.to_string(index=False)}\n"
     prompt_final = f"""
     A partir de los siguientes datos resumidos sobre la presencia mediática de "{marca_analizada}":
     ---
@@ -269,7 +269,7 @@ def generar_resumen_estrategico(client, df, marca_analizada):
     """
     try:
         response = client.chat.completions.create(
-            model="gpt-4.1-mini-2025-04-14",
+            model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "Eres un analista de medios experto en resumir datos para informes ejecutivos concisos y directos."},
                 {"role": "user", "content": prompt_final}
@@ -287,20 +287,17 @@ if check_password():
     st.caption("Una herramienta inteligente para mapear, limpiar, deduplicar y analizar tus informes con precisión.")
     st.divider()
 
-    # <<< INICIO DE LA MODIFICACIÓN: Eliminación del mapeo de empresas >>>
     with st.sidebar:
         st.header("📂 Paso 1: Carga y Depuración")
         uploaded_main_file = st.file_uploader("1. Informe Principal de Noticias", type="xlsx", key="main_file")
         uploaded_internet_map = st.file_uploader("2. Mapeo de Medios de Internet", type="xlsx", key="internet_map")
         uploaded_region_map = st.file_uploader("3. Mapeo de Regiones", type="xlsx", key="region_map")
-        # El cargador de Mapeo de Empresas ha sido eliminado.
         st.divider()
         process_button = st.button("🚀 Analizar y Depurar Archivos", type="primary", use_container_width=True)
 
     if 'deduplication_complete' not in st.session_state: st.session_state.deduplication_complete = False
-    if 'ai_analysis_complete' not in st.session_state: st.session_state.ai_analysis_complete = False
+    if 'ai_analysis_complete' not in st.session_state: st.session_state.ai_analysis_complete = False 
 
-    # La comprobación ahora es para 3 archivos en lugar de 4.
     all_files_uploaded = (uploaded_main_file and uploaded_internet_map and uploaded_region_map)
 
     if process_button:
@@ -315,7 +312,6 @@ if check_password():
                     region_dict = {str(r[0].value).lower().strip(): str(r[1].value) for r in openpyxl.load_workbook(uploaded_region_map, data_only=True).active.iter_rows(min_row=2) if r[0].value and r[1].value}
                     
                     status.write("🧠 Ejecutando deduplicación...")
-                    # La llamada a la función ya no pasa el diccionario de empresas.
                     final_wb, nissan_wb, summary = run_deduplication_process(wb_main, internet_dict, region_dict)
                     
                     status.update(label="✅ ¡Deduplicación completada!", state="complete", expanded=False)
@@ -333,9 +329,7 @@ if check_password():
                     st.exception(e)
                     st.session_state.deduplication_complete = False
         else:
-            # Mensaje de advertencia actualizado para 3 archivos.
             st.warning("⚠️ Por favor, asegúrate de cargar los tres archivos requeridos.")
-    # <<< FIN DE LA MODIFICACIÓN >>>
 
     if st.session_state.deduplication_complete:
         st.header("Resultados de la Deduplicación")
@@ -388,12 +382,16 @@ if check_password():
                             clasificador_tema = ClasificadorTemasAvanzado(client)
                             df_analizado_ia = clasificador_tema.procesar_dataframe(df_con_tono.copy(), 'resumen')
                             df_final_completo = st.session_state.df_depurado.copy()
-                            if len(df_final_completo) == len(df_analizado_ia):
-                                df_final_completo['Tono_IA'] = df_analizado_ia['tono'].values
-                                df_final_completo['Tema_IA'] = df_analizado_ia['tema'].values
+                            
+                            df_conservadas = df_final_completo[df_final_completo['Mantener'] == 'Conservar'].copy()
+                            if len(df_conservadas) == len(df_analizado_ia):
+                                df_conservadas['Tono_IA'] = df_analizado_ia['tono'].values
+                                df_conservadas['Tema_IA'] = df_analizado_ia['tema'].values
+                                df_final_completo.update(df_conservadas)
                             else:
-                                st.error("Error: el número de filas del análisis no coincide con el informe depurado. No se puede combinar.")
+                                st.error(f"Error: el número de filas conservadas ({len(df_conservadas)}) no coincide con las filas analizadas por IA ({len(df_analizado_ia)}). No se puede combinar.")
                                 raise Exception("Error de coincidencia de filas.")
+
                             status.write("Generando Resumen Ejecutivo...")
                             resumen_texto = generar_resumen_estrategico(client, df_final_completo, marca)
                             st.session_state.resumen_ejecutivo = resumen_texto
@@ -411,7 +409,6 @@ if check_password():
                                 cell.alignment = Alignment(wrap_text=True, vertical='top')
                         st.session_state.ai_analyzed_stream = output_stream
                         st.session_state.ai_analysis_complete = True
-                        st.balloons()
                 except openai.AuthenticationError:
                     st.error("Error de autenticación con OpenAI. Verifica que tu API Key sea correcta.")
                     st.session_state.ai_analysis_complete = False

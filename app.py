@@ -383,10 +383,8 @@ if check_password():
                             df_analizado_ia = clasificador_tema.procesar_dataframe(df_con_tono.copy(), 'resumen')
                             df_final_completo = st.session_state.df_depurado.copy()
                             
-                            # --- SECCIÓN CORREGIDA ---
                             df_conservadas = df_final_completo[df_final_completo['Mantener'] == 'Conservar'].copy()
                             if len(df_conservadas) == len(df_analizado_ia):
-                                # Asignar los resultados de la IA a las filas conservadas
                                 df_final_completo.loc[df_final_completo['Mantener'] == 'Conservar', 'Tono_IA'] = df_analizado_ia['tono'].values
                                 df_final_completo.loc[df_final_completo['Mantener'] == 'Conservar', 'Tema_IA'] = df_analizado_ia['tema'].values
                             else:
@@ -395,14 +393,25 @@ if check_password():
 
                             status.write("Generando Resumen Ejecutivo...")
                             resumen_texto = generar_resumen_estrategico(client, df_final_completo, marca)
-                            st.session_state.resumen_ejecutivo = resumen_texto
+                            
+                            # --- INICIO DE LA SECCIÓN MODIFICADA ---
+                            # Limpieza para asegurar que el resumen sea texto plano
+                            resumen_plano = resumen_texto
+                            resumen_plano = re.sub(r'(\*\*|__)(.*?)(\1)', r'\2', resumen_plano)
+                            resumen_plano = re.sub(r'(\*|_)(.*?)(\1)', r'\2', resumen_plano)
+                            resumen_plano = re.sub(r'^\s*#+\s*', '', resumen_plano, flags=re.MULTILINE)
+                            resumen_plano = re.sub(r'^\s*[\*\-]\s*', '', resumen_plano, flags=re.MULTILINE)
+                            resumen_plano = re.sub(r'^\s*\d+\.\s*', '', resumen_plano, flags=re.MULTILINE)
+                            st.session_state.resumen_ejecutivo = resumen_plano
+                            # --- FIN DE LA SECCIÓN MODIFICADA ---
+                            
                             status.update(label="¡Análisis IA completado!", state="complete", expanded=False)
                         output_stream = io.BytesIO()
                         with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
                             df_final_completo.to_excel(writer, index=False, sheet_name='Resultados_IA')
                             if 'resumen_ejecutivo' in st.session_state and st.session_state.resumen_ejecutivo:
-                                resumen_texto = st.session_state.resumen_ejecutivo
-                                summary_df = pd.DataFrame({'Diagnostico General': [resumen_texto]})
+                                resumen_texto_final = st.session_state.resumen_ejecutivo
+                                summary_df = pd.DataFrame({'Diagnostico General': [resumen_texto_final]})
                                 summary_df.to_excel(writer, index=False, sheet_name='Diagnostico_General')
                                 worksheet = writer.sheets['Diagnostico_General']
                                 worksheet.column_dimensions['A'].width = 120

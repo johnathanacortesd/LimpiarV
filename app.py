@@ -383,11 +383,12 @@ if check_password():
                             df_analizado_ia = clasificador_tema.procesar_dataframe(df_con_tono.copy(), 'resumen')
                             df_final_completo = st.session_state.df_depurado.copy()
                             
+                            # --- SECCIÓN CORREGIDA ---
                             df_conservadas = df_final_completo[df_final_completo['Mantener'] == 'Conservar'].copy()
                             if len(df_conservadas) == len(df_analizado_ia):
-                                df_conservadas['Tono_IA'] = df_analizado_ia['tono'].values
-                                df_conservadas['Tema_IA'] = df_analizado_ia['tema'].values
-                                df_final_completo.update(df_conservadas)
+                                # Asignar los resultados de la IA a las filas conservadas
+                                df_final_completo.loc[df_final_completo['Mantener'] == 'Conservar', 'Tono_IA'] = df_analizado_ia['tono'].values
+                                df_final_completo.loc[df_final_completo['Mantener'] == 'Conservar', 'Tema_IA'] = df_analizado_ia['tema'].values
                             else:
                                 st.error(f"Error: el número de filas conservadas ({len(df_conservadas)}) no coincide con las filas analizadas por IA ({len(df_analizado_ia)}). No se puede combinar.")
                                 raise Exception("Error de coincidencia de filas.")

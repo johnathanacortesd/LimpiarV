@@ -265,7 +265,6 @@ def run_deduplication_process(wb, internet_dict, region_dict):
     nissan_sheet.append(["Resumen"])
     processed_rows.sort(key=lambda r: r.get('original_row_index', 0))
     
-    id_noticia_key = norm_key("ID Noticia")
     mantener_key = norm_key("Mantener")
     titulo_key = norm_key("Título")
     resumen_key = norm_key("Resumen - Aclaracion")
@@ -288,20 +287,28 @@ def run_deduplication_process(wb, internet_dict, region_dict):
     link_nota_idx = final_order.index("Link Nota")
     link_streaming_idx = final_order.index("Link (Streaming - Imagen)")
     
-    row_map = {row.get('original_row_index'): row for row in processed_rows}
-    for i, sheet_row in enumerate(main_sheet.iter_rows(min_row=2)):
-        original_idx = sorted(row_map.keys())[i]
-        processed = row_map[original_idx]
-        
-        link_data = processed.get(norm_key("Link Nota"))
-        if isinstance(link_data, dict) and link_data.get("url"):
-            cell = sheet_row[link_nota_idx]
-            cell.hyperlink = link_data["url"]; cell.value = "Link"; cell.style = "CustomLink"
+    # --- INICIO DE LA SECCIÓN CORREGIDA ---
+    # La lógica anterior con `row_map` era la causa del error.
+    # Esta nueva lógica es más simple y segura, ya que el orden de `processed_rows`
+    # y las filas en `main_sheet` es idéntico.
+    for i, sheet_row_cells in enumerate(main_sheet.iter_rows(min_row=2)):
+        if i < len(processed_rows):
+            processed = processed_rows[i]
             
-        link_data_stream = processed.get(norm_key("Link (Streaming - Imagen)"))
-        if isinstance(link_data_stream, dict) and link_data_stream.get("url"):
-            cell = sheet_row[link_streaming_idx]
-            cell.hyperlink = link_data_stream["url"]; cell.value = "Link"; cell.style = "CustomLink"
+            link_data = processed.get(norm_key("Link Nota"))
+            if isinstance(link_data, dict) and link_data.get("url"):
+                cell = sheet_row_cells[link_nota_idx]
+                cell.hyperlink = link_data["url"]
+                cell.value = "Link"
+                cell.style = "CustomLink"
+            
+            link_data_stream = processed.get(norm_key("Link (Streaming - Imagen)"))
+            if isinstance(link_data_stream, dict) and link_data_stream.get("url"):
+                cell = sheet_row_cells[link_streaming_idx]
+                cell.hyperlink = link_data_stream["url"]
+                cell.value = "Link"
+                cell.style = "CustomLink"
+    # --- FIN DE LA SECCIÓN CORREGIDA ---
 
     summary = {
         "total_rows": len(processed_rows),

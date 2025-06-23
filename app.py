@@ -40,7 +40,7 @@ def check_password():
         return False
     return True
 
-# --- CLASES DE ANÁLISIS DE IA (INTEGRADAS) ---
+# --- CLASES DE ANÁLISIS DE IA (INTEGRADAS, SIN CAMBIOS) ---
 class ClasificadorTonoNoticias:
     def __init__(self, marca, client_openai):
         self.marca=marca; self.client=client_openai; self.embeddings_cache={}; self.tonos_asignados_cache={}; self.grupos_similares_info={}
@@ -231,6 +231,62 @@ class ClasificadorTemasAvanzado:
         status_text.empty()
         return df
 
+# --- NUEVA FUNCIÓN PARA GENERAR RESUMEN EJECUTIVO ---
+def generar_resumen_estrategico(client, df, marca_analizada):
+    datos_contexto = ""
+    
+    volumen_total = len(df)
+    dist_tono = df['Tono_IA'].value_counts().to_string().replace('\n', ', ')
+    datos_contexto += f"- Diagnóstico General: {volumen_total} menciones analizadas. Distribución de tono: {dist_tono}.\n"
+
+    top_temas = df['Tema_IA'].value_counts().nlargest(5).to_string().replace('\n', ', ')
+    datos_contexto += f"- Temas Principales: {top_temas}.\n"
+
+    # Buscar columnas de KPI de forma robusta
+    col_audiencia, col_cpe = None, None
+    for col in df.columns:
+        if 'audiencia' in col.lower(): col_audiencia = col
+        if 'cpe' in col.lower(): col_cpe = col
+
+    if col_audiencia:
+        riesgos = df[df['Tono_IA'] == 'Negativo'].nlargest(3, col_audiencia)[['Tema_IA', col_audiencia]].copy()
+        if not riesgos.empty:
+            riesgos[col_audiencia] = riesgos[col_audiencia].apply(lambda x: f"{x:,.0f}")
+            datos_contexto += f"- Riesgos Potenciales (Temas Negativos con Mayor Audiencia):\n{riesgos.to_string(index=False)}\n"
+    
+    if col_cpe:
+        riesgos_cpe = df[df['Tono_IA'] == 'Negativo'].nlargest(3, col_cpe)[['Tema_IA', col_cpe]].copy()
+        if not riesgos_cpe.empty:
+             riesgos_cpe[col_cpe] = riesgos_cpe[col_cpe].apply(lambda x: f"${x:,.0f}")
+             datos_contexto += f"- Riesgos Potenciales (Temas Negativos con Mayor CPE):\n{riesgos_cpe.to_string(index=False)}\n"
+
+    prompt_final = f"""
+    A partir de los siguientes datos resumidos sobre la presencia mediática de "{marca_analizada}":
+    ---
+    {datos_contexto}
+    ---
+    Analiza los datos y presenta un informe ejecutivo conciso en español.
+    **Instrucciones:**
+    1. **Diagnóstico General:** Una o dos oraciones que resuman la situación mediática general, considerando el volumen y el tono predominante.
+    2. **Puntos Clave:** Enumera 2-3 hallazgos cruciales, conectando los temas más importantes con su tono y alcance (si hay datos de CPE/Audiencia).
+    3. **Riesgos Potenciales:** Identifica explícitamente 1-2 riesgos evidentes en los datos, por ejemplo, temas negativos con alta audiencia o costo.
+    **NO INCLUYAS RECOMENDACIONES.** Limítate a diagnosticar con un lenguaje claro y directo, en formato de texto plano.
+    """
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini-2025-04-14",
+            messages=[
+                {"role": "system", "content": "Eres un analista de medios experto en resumir datos para informes ejecutivos concisos y directos."},
+                {"role": "user", "content": prompt_final}
+            ],
+            max_tokens=500, temperature=0.2
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        st.warning(f"No se pudo generar el resumen estratégico: {e}")
+        return "El resumen ejecutivo no pudo ser generado debido a un error en la API."
+
 # --- FLUJO PRINCIPAL DE LA APLICACIÓN ---
 if check_password():
     st.title("✨ Intelli-Clean: Depurador y Analizador de Noticias")
@@ -259,7 +315,7 @@ if check_password():
     # --- Lógica del botón de deduplicación ---
     if process_button:
         st.session_state.deduplication_complete = False
-        st.session_state.ai_analysis_complete = False # Reiniciar el estado de IA
+        st.session_state.ai_analysis_complete = False 
         if all_files_uploaded:
             with st.status("Iniciando proceso de deduplicación... ⏳", expanded=True) as status:
                 try:
@@ -280,7 +336,9 @@ if check_password():
                     final_wb.save(main_stream)
                     st.session_state.main_stream = main_stream
 
-                    # Guardamos el workbook de nissan para el análisis IA
+                    # Guardar el DataFrame depurado y el workbook de nissan para el análisis IA
+                    main_stream.seek(0)
+                    st.session_state.df_depurado = pd.read_excel(main_stream)
                     st.session_state.nissan_wb = nissan_wb
                     
                     st.session_state.deduplication_complete = True
@@ -306,37 +364,33 @@ if check_password():
         
         st.download_button(
             label="1. Descargar Informe Principal Depurado", 
-            data=st.session_state.main_stream, 
+            data=st.session_state.main_stream.getvalue(), 
             file_name=f"Informe_Depurado_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", 
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
             use_container_width=True
         )
-
         st.divider()
         
-        # --- NUEVA SECCIÓN PARA ANÁLISIS IA ---
+        # --- SECCIÓN PARA ANÁLISIS IA ---
         st.header("🤖 Paso 2: Análisis con IA (Opcional)")
-        st.info("Utiliza el poder de la IA para clasificar automáticamente el Tono y Tema de las noticias conservadas.")
+        st.info("Utiliza el poder de la IA para clasificar Tono, Tema y generar un diagnóstico estratégico.")
 
         with st.form("ai_analysis_form"):
             try:
-                default_key = st.secrets["OPENAI_API_KEY"]
+                api_key = st.secrets["OPENAI_API_KEY"]
                 st.success("API Key cargada desde Secrets.", icon="✅")
-                api_key = default_key
             except (KeyError, AttributeError):
                 st.warning("No se encontraron Secrets. Ingresa la API Key manualmente.", icon="⚠️")
                 api_key = st.text_input("Ingresa tu API Key de OpenAI", type="password")
 
             marca = st.text_input("➡️ Ingresa la Marca o Cliente para el análisis", placeholder="Ej: Coca-Cola")
-            
-            ai_submit_button = st.form_submit_button("🧠 Analizar Tono y Tema con IA", type="primary", use_container_width=True)
+            ai_submit_button = st.form_submit_button("🧠 Analizar y Diagnosticar con IA", type="primary", use_container_width=True)
 
         if ai_submit_button:
             if not api_key or not marca:
                 st.error("Es necesario proporcionar la API Key de OpenAI y el nombre de la Marca.")
             else:
                 try:
-                    # Convertir el workbook en memoria a un DataFrame de Pandas
                     nissan_wb_obj = st.session_state.nissan_wb
                     stream = io.BytesIO()
                     nissan_wb_obj.save(stream)
@@ -350,20 +404,30 @@ if check_password():
                         with st.status("Realizando análisis con IA...", expanded=True) as status:
                             status.write("Clasificando Tono...")
                             clasificador_tono = ClasificadorTonoNoticias(marca, client)
-                            # La columna se llama 'Resumen' en el excel, se normaliza a 'resumen'
                             df_con_tono = clasificador_tono.procesar_dataframe(df_for_ai.copy(), 'resumen')
                             
                             status.write("Identificando Temas...")
                             clasificador_tema = ClasificadorTemasAvanzado(client)
-                            df_final_ai = clasificador_tema.procesar_dataframe(df_con_tono.copy(), 'resumen')
+                            df_analizado_ia = clasificador_tema.procesar_dataframe(df_con_tono.copy(), 'resumen')
+                            
+                            # Combinar resultados del AI con el dataframe depurado original
+                            df_final_completo = st.session_state.df_depurado.copy()
+                            if len(df_final_completo) == len(df_analizado_ia):
+                                df_final_completo['Tono_IA'] = df_analizado_ia['Tono'].values
+                                df_final_completo['Tema_IA'] = df_analizado_ia['Tema'].values
+                            else:
+                                st.error("Error: el número de filas del análisis no coincide con el informe depurado. No se puede combinar.")
+                                raise Exception("Error de coincidencia de filas.")
+
+                            status.write("Generando Resumen Ejecutivo...")
+                            resumen_texto = generar_resumen_estrategico(client, df_final_completo, marca)
+                            st.session_state.resumen_ejecutivo = resumen_texto
 
                             status.update(label="¡Análisis IA completado!", state="complete", expanded=False)
 
-                        # Guardar el resultado en un stream para descarga
                         output_stream = io.BytesIO()
                         with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
-                            df_final_ai.to_excel(writer, index=False, sheet_name='Resultados_IA')
-                        
+                            df_final_completo.to_excel(writer, index=False, sheet_name='Resultados_IA')
                         st.session_state.ai_analyzed_stream = output_stream
                         st.session_state.ai_analysis_complete = True
                         st.balloons()
@@ -376,13 +440,19 @@ if check_password():
                     st.exception(e)
                     st.session_state.ai_analysis_complete = False
 
-    # --- Bloque para mostrar resultados del análisis IA ---
+    # --- Bloque para mostrar resultados del análisis IA y Diagnóstico ---
     if st.session_state.get('ai_analysis_complete', False):
-        st.subheader("✅ Resultados del Análisis IA")
-        st.success("El análisis de Tono y Tema ha finalizado. Puedes descargar el reporte completo.")
+        st.header("✅ Resultados del Análisis IA")
+        
+        st.subheader("📝 Resumen Ejecutivo Estratégico")
+        st.text_area("Diagnóstico General", value=st.session_state.resumen_ejecutivo, height=250, disabled=True)
+        st.markdown("---")
+
+        st.subheader("📥 Descargar Reporte Final")
+        st.info("Este archivo contiene los datos depurados con las columnas 'Tono_IA' y 'Tema_IA' añadidas.")
         st.download_button(
-            label="2. Descargar Reporte Analizado con IA (Tono y Tema)",
-            data=st.session_state.ai_analyzed_stream,
+            label="2. Descargar Reporte Completo Analizado con IA",
+            data=st.session_state.ai_analyzed_stream.getvalue(),
             file_name=f"Reporte_Analizado_IA_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True

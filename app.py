@@ -8,7 +8,7 @@ import html
 import numpy as np
 
 # --- Configuración de la página ---
-st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.1", layout="wide")
+st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.2", layout="wide")
 
 # ==============================================================================
 # SECCIÓN DE FUNCIONES AUXILIARES
@@ -37,7 +37,6 @@ def clean_title_for_output(title):
     title = re.sub(r'\s*[|-]\s*[\w\s]+$', '', title).strip()
     return title
 
-# --- FUNCIÓN DE LIMPIEZA DE RESUMEN RESTAURADA ---
 def corregir_texto(text):
     if not isinstance(text, str): return text
     text = convert_html_entities(text)
@@ -111,7 +110,6 @@ def run_full_process(dossier_file, config_file):
     for col in original_headers:
         if col not in df.columns: df[col] = None
     
-    # --- LIMPIEZA DE TEXTO RESTAURADA ---
     df['Título'] = df['Título'].astype(str).apply(clean_title_for_output)
     df['Resumen - Aclaracion'] = df['Resumen - Aclaracion'].astype(str).apply(corregir_texto)
 
@@ -130,6 +128,7 @@ def run_full_process(dossier_file, config_file):
 
     progress_text.info("Paso 4/4: Detectando duplicados y generando resultados...")
     df['titulo_norm'] = df['Título'].apply(normalize_title_for_comparison)
+    # --- MANEJO DE FECHA MEJORADO ---
     df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce').dt.normalize()
     
     df['seccion_priority'] = df['Sección - Programa'].isnull() | (df['Sección - Programa'] == '')
@@ -179,7 +178,8 @@ def run_full_process(dossier_file, config_file):
     final_columns_in_df = [col for col in final_order if col in df_final.columns]
     df_for_editor = df_final[final_columns_in_df].copy()
     if 'Fecha' in df_for_editor.columns:
-        df_for_editor['Fecha'] = pd.to_datetime(df_for_editor['Fecha']).dt.strftime('%d/%m/%Y').replace('NaT', '')
+        # --- MANEJO DE FECHA MEJORADO PARA LA PREVISUALIZACIÓN ---
+        df_for_editor['Fecha'] = df_for_editor['Fecha'].dt.strftime('%d/%m/%Y').fillna('')
     for col_name in ['Link Nota', 'Link (Streaming - Imagen)']:
         if col_name in df_for_editor.columns:
             df_for_editor[col_name] = df_for_editor[col_name].apply(lambda x: 'Link' if pd.notna(x) else '')
@@ -188,7 +188,7 @@ def run_full_process(dossier_file, config_file):
 # ==============================================================================
 # INTERFAZ PRINCIPAL DE STREAMLIT
 # ==============================================================================
-st.title("🚀 Procesador de Dossiers (Lite) v1.1")
+st.title("🚀 Procesador de Dossiers (Lite) v1.2")
 st.markdown("Una herramienta para limpiar, deduplicar y mapear dossieres de noticias.")
 st.info("**Instrucciones:**\n\n1. Prepara tu archivo **Dossier** principal y tu archivo **`Configuracion.xlsx`**.\n2. Sube ambos archivos juntos en el área de abajo.\n3. Haz clic en 'Iniciar Proceso'.")
 with st.expander("Ver estructura requerida para `Configuracion.xlsx`"):

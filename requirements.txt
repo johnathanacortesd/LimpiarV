@@ -1,6 +1,5 @@
 streamlit
 pandas
 openpyxl
-openai
-scikit-learn
-unidecode
+xlsxwriter
+numpy

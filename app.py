@@ -8,7 +8,7 @@ import html
 import numpy as np
 
 # --- Configuración de la página ---
-st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.0", layout="wide")
+st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.1", layout="wide")
 
 # ==============================================================================
 # SECCIÓN DE FUNCIONES AUXILIARES
@@ -36,6 +36,16 @@ def clean_title_for_output(title):
     title = convert_html_entities(title)
     title = re.sub(r'\s*[|-]\s*[\w\s]+$', '', title).strip()
     return title
+
+# --- FUNCIÓN DE LIMPIEZA DE RESUMEN RESTAURADA ---
+def corregir_texto(text):
+    if not isinstance(text, str): return text
+    text = convert_html_entities(text)
+    text = re.sub(r'(<br>|\[\.\.\.\]|\s+)', ' ', text).strip()
+    match = re.search(r'[A-Z]', text)
+    if match: text = text[match.start():]
+    if text and not text.endswith('...'): text = text.rstrip('.') + '...'
+    return text
 
 def to_excel_from_df(df, final_order):
     output = io.BytesIO()
@@ -97,10 +107,14 @@ def run_full_process(dossier_file, config_file):
     df = pd.DataFrame(rows_to_expand)
     df['Mantener'] = 'Conservar'
 
-    progress_text.info("Paso 3/4: Aplicando mapeos y normalizaciones...")
+    progress_text.info("Paso 3/4: Aplicando limpieza, mapeos y normalizaciones...")
     for col in original_headers:
         if col not in df.columns: df[col] = None
+    
+    # --- LIMPIEZA DE TEXTO RESTAURADA ---
     df['Título'] = df['Título'].astype(str).apply(clean_title_for_output)
+    df['Resumen - Aclaracion'] = df['Resumen - Aclaracion'].astype(str).apply(corregir_texto)
+
     tipo_medio_map = {'online': 'Internet', 'diario': 'Prensa', 'am': 'Radio', 'fm': 'Radio', 'aire': 'Televisión', 'cable': 'Televisión', 'revista': 'Revista'}
     df['Tipo de Medio'] = df['Tipo de Medio'].str.lower().str.strip().map(tipo_medio_map).fillna(df['Tipo de Medio'])
     is_internet = df['Tipo de Medio'] == 'Internet'
@@ -174,7 +188,7 @@ def run_full_process(dossier_file, config_file):
 # ==============================================================================
 # INTERFAZ PRINCIPAL DE STREAMLIT
 # ==============================================================================
-st.title("🚀 Procesador de Dossiers (Lite)")
+st.title("🚀 Procesador de Dossiers (Lite) v1.1")
 st.markdown("Una herramienta para limpiar, deduplicar y mapear dossieres de noticias.")
 st.info("**Instrucciones:**\n\n1. Prepara tu archivo **Dossier** principal y tu archivo **`Configuracion.xlsx`**.\n2. Sube ambos archivos juntos en el área de abajo.\n3. Haz clic en 'Iniciar Proceso'.")
 with st.expander("Ver estructura requerida para `Configuracion.xlsx`"):

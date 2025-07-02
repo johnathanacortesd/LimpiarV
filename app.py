@@ -8,7 +8,7 @@ import html
 import numpy as np
 
 # --- Configuración de la página ---
-st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.3", layout="wide")
+st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.4", layout="wide")
 
 # ==============================================================================
 # SECCIÓN DE FUNCIONES AUXILIARES
@@ -34,7 +34,8 @@ def normalize_title_for_comparison(title):
 def clean_title_for_output(title):
     if not isinstance(title, str): return ""
     title = convert_html_entities(title)
-    title = re.sub(r'\s*[|-]\s*[\w\s]+$', '', title).strip()
+    # --- SOLUCIÓN DEFINITIVA: Regex más robusta para limpiar el sufijo ---
+    title = re.sub(r'\s*[|-].*$', '', title).strip()
     return title
 
 def corregir_texto(text):
@@ -128,7 +129,6 @@ def run_full_process(dossier_file, config_file):
 
     progress_text.info("Paso 4/4: Detectando duplicados y generando resultados...")
     df['titulo_norm'] = df['Título'].apply(normalize_title_for_comparison)
-    # --- MANEJO DE FECHA DEFINITIVO ---
     df['Fecha'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce').dt.normalize()
     
     df['seccion_priority'] = df['Sección - Programa'].isnull() | (df['Sección - Programa'] == '')
@@ -187,7 +187,7 @@ def run_full_process(dossier_file, config_file):
 # ==============================================================================
 # INTERFAZ PRINCIPAL DE STREAMLIT
 # ==============================================================================
-st.title("🚀 Procesador de Dossiers (Lite) v1.3")
+st.title("🚀 Procesador de Dossiers (Lite) v1.4")
 st.markdown("Una herramienta para limpiar, deduplicar y mapear dossieres de noticias.")
 st.info("**Instrucciones:**\n\n1. Prepara tu archivo **Dossier** principal y tu archivo **`Configuracion.xlsx`**.\n2. Sube ambos archivos juntos en el área de abajo.\n3. Haz clic en 'Iniciar Proceso'.")
 with st.expander("Ver estructura requerida para `Configuracion.xlsx`"):

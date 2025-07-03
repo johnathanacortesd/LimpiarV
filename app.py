@@ -8,7 +8,7 @@ import html
 import numpy as np
 
 # --- Configuración de la página ---
-st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.4", layout="wide")
+st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.5", layout="wide")
 
 # ==============================================================================
 # SECCIÓN DE FUNCIONES AUXILIARES
@@ -34,7 +34,6 @@ def normalize_title_for_comparison(title):
 def clean_title_for_output(title):
     if not isinstance(title, str): return ""
     title = convert_html_entities(title)
-    # --- SOLUCIÓN DEFINITIVA: Regex más robusta para limpiar el sufijo ---
     title = re.sub(r'\s*[|-].*$', '', title).strip()
     return title
 
@@ -119,11 +118,18 @@ def run_full_process(dossier_file, config_file):
     is_internet = df['Tipo de Medio'] == 'Internet'
     is_print = df['Tipo de Medio'].isin(['Prensa', 'Revista'])
     is_broadcast = df['Tipo de Medio'].isin(['Radio', 'Televisión'])
+    
     df.loc[is_internet, ['Link Nota', 'Link (Streaming - Imagen)']] = df.loc[is_internet, ['Link (Streaming - Imagen)', 'Link Nota']].values
     cond_copy = is_print & df['Link Nota'].isnull() & df['Link (Streaming - Imagen)'].notnull()
     df.loc[cond_copy, 'Link Nota'] = df.loc[cond_copy, 'Link (Streaming - Imagen)']
     df.loc[is_print, 'Link (Streaming - Imagen)'] = None
     df.loc[is_broadcast, 'Link (Streaming - Imagen)'] = None
+    
+    # --- INICIO DE LA NUEVA LÓGICA ---
+    if 'Duración - Nro. Caracteres' in df.columns and 'Dimensión' in df.columns:
+        df.loc[is_broadcast, 'Dimensión'] = df.loc[is_broadcast, 'Duración - Nro. Caracteres']
+    # --- FIN DE LA NUEVA LÓGICA ---
+    
     df['Región'] = df['Medio'].astype(str).str.lower().str.strip().map(region_map)
     df.loc[is_internet, 'Medio'] = df.loc[is_internet, 'Medio'].astype(str).str.lower().str.strip().map(internet_map).fillna(df.loc[is_internet, 'Medio'])
 
@@ -187,7 +193,7 @@ def run_full_process(dossier_file, config_file):
 # ==============================================================================
 # INTERFAZ PRINCIPAL DE STREAMLIT
 # ==============================================================================
-st.title("🚀 Procesador de Dossiers (Lite) v1.4")
+st.title("🚀 Procesador de Dossiers (Lite) v1.5")
 st.markdown("Una herramienta para limpiar, deduplicar y mapear dossieres de noticias.")
 st.info("**Instrucciones:**\n\n1. Prepara tu archivo **Dossier** principal y tu archivo **`Configuracion.xlsx`**.\n2. Sube ambos archivos juntos en el área de abajo.\n3. Haz clic en 'Iniciar Proceso'.")
 with st.expander("Ver estructura requerida para `Configuracion.xlsx`"):

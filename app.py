@@ -8,7 +8,7 @@ import html
 import numpy as np
 
 # --- Configuración de la página ---
-st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.5", layout="wide")
+st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.6", layout="wide")
 
 # ==============================================================================
 # SECCIÓN DE FUNCIONES AUXILIARES
@@ -125,10 +125,13 @@ def run_full_process(dossier_file, config_file):
     df.loc[is_print, 'Link (Streaming - Imagen)'] = None
     df.loc[is_broadcast, 'Link (Streaming - Imagen)'] = None
     
-    # --- INICIO DE LA NUEVA LÓGICA ---
+    # --- INICIO DE LA LÓGICA "CORTAR Y PEGAR" ---
     if 'Duración - Nro. Caracteres' in df.columns and 'Dimensión' in df.columns:
+        # 1. Copiar el valor a la columna Dimensión para medios broadcast
         df.loc[is_broadcast, 'Dimensión'] = df.loc[is_broadcast, 'Duración - Nro. Caracteres']
-    # --- FIN DE LA NUEVA LÓGICA ---
+        # 2. Limpiar (cortar) el valor de la columna original para esos mismos medios
+        df.loc[is_broadcast, 'Duración - Nro. Caracteres'] = np.nan
+    # --- FIN DE LA LÓGICA "CORTAR Y PEGAR" ---
     
     df['Región'] = df['Medio'].astype(str).str.lower().str.strip().map(region_map)
     df.loc[is_internet, 'Medio'] = df.loc[is_internet, 'Medio'].astype(str).str.lower().str.strip().map(internet_map).fillna(df.loc[is_internet, 'Medio'])
@@ -193,7 +196,7 @@ def run_full_process(dossier_file, config_file):
 # ==============================================================================
 # INTERFAZ PRINCIPAL DE STREAMLIT
 # ==============================================================================
-st.title("🚀 Procesador de Dossiers (Lite) v1.5")
+st.title("🚀 Procesador de Dossiers (Lite) v1.6")
 st.markdown("Una herramienta para limpiar, deduplicar y mapear dossieres de noticias.")
 st.info("**Instrucciones:**\n\n1. Prepara tu archivo **Dossier** principal y tu archivo **`Configuracion.xlsx`**.\n2. Sube ambos archivos juntos en el área de abajo.\n3. Haz clic en 'Iniciar Proceso'.")
 with st.expander("Ver estructura requerida para `Configuracion.xlsx`"):

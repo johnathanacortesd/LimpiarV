@@ -19,22 +19,103 @@ def extract_link_from_cell(cell):
     return None
 
 def convert_html_entities(text):
-    if not isinstance(text, str): return text
+    """
+    Convierte entidades HTML mal codificadas a caracteres normales.
+    Maneja tanto entidades hexadecimales como decimales.
+    """
+    if not isinstance(text, str): 
+        return text
+    
+    # Primero decodificar entidades HTML estándar
     text = html.unescape(text)
-    custom_replacements = { '“': '\"', '”': '\"', '‘': "'", '’': "'", 'Â': '', 'â': '', '€': '', '™': '' }
+    
+    # Manejar entidades HTML numéricas hexadecimales específicas
+    html_entities = {
+        '&#xF3;': 'ó',  # ó
+        '&#xE1;': 'á',  # á
+        '&#xE9;': 'é',  # é
+        '&#xED;': 'í',  # í
+        '&#xFA;': 'ú',  # ú
+        '&#xF1;': 'ñ',  # ñ
+        '&#xDC;': 'Ü',  # Ü
+        '&#xFC;': 'ü',  # ü
+        '&#xC1;': 'Á',  # Á
+        '&#xC9;': 'É',  # É
+        '&#xCD;': 'Í',  # Í
+        '&#xD3;': 'Ó',  # Ó
+        '&#xDA;': 'Ú',  # Ú
+        '&#xD1;': 'Ñ',  # Ñ
+    }
+    
+    # Reemplazar entidades HTML numéricas hexadecimales
+    for entity, char in html_entities.items():
+        text = text.replace(entity, char)
+    
+    # Patrón para capturar otras entidades hexadecimales que no estén en el diccionario
+    def replace_hex_entity(match):
+        try:
+            hex_code = match.group(1)
+            char_code = int(hex_code, 16)
+            return chr(char_code)
+        except (ValueError, OverflowError):
+            return match.group(0)  # Devolver original si no se puede convertir
+    
+    text = re.sub(r'&#x([0-9A-Fa-f]+);', replace_hex_entity, text)
+    
+    # Patrón para entidades decimales
+    def replace_decimal_entity(match):
+        try:
+            decimal_code = int(match.group(1))
+            return chr(decimal_code)
+        except (ValueError, OverflowError):
+            return match.group(0)  # Devolver original si no se puede convertir
+    
+    text = re.sub(r'&#(\d+);', replace_decimal_entity, text)
+    
+    # Limpiar caracteres problemáticos adicionales
+    custom_replacements = {
+        '"': '"',
+        '"': '"', 
+        ''': "'", 
+        ''': "'", 
+        'Â': '', 
+        'â': '', 
+        '€': '', 
+        '™': ''
+    }
+    
     for entity, char in custom_replacements.items():
         text = text.replace(entity, char)
+    
     return text
 
 def normalize_title_for_comparison(title):
-    if not isinstance(title, str): return ""
+    """
+    Normaliza el título para comparación de duplicados.
+    """
+    if not isinstance(title, str): 
+        return ""
+    
+    # Limpiar entidades HTML primero
     title = convert_html_entities(title)
+    
+    # Normalizar para comparación (remover caracteres especiales y convertir a minúsculas)
     return re.sub(r'\W+', ' ', title).lower().strip()
 
 def clean_title_for_output(title):
-    if not isinstance(title, str): return ""
+    """
+    Limpia el título removiendo entidades HTML mal codificadas,
+    pero SIN cortar el texto en guiones o barras verticales.
+    """
+    if not isinstance(title, str): 
+        return ""
+    
+    # Solo limpiar entidades HTML, NO cortar el título
     title = convert_html_entities(title)
-    title = re.sub(r'\s*[|-].*$', '', title).strip()
+    
+    # Limpiar espacios múltiples
+    title = re.sub(r'\s+', ' ', title).strip()
+    
     return title
 
 def corregir_texto(text):

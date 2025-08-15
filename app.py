@@ -8,7 +8,7 @@ import html
 import numpy as np
 
 # --- Configuración de la página ---
-st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.7", layout="wide")
+st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.6", layout="wide")
 
 # ==============================================================================
 # SECCIÓN DE FUNCIONES AUXILIARES
@@ -21,51 +21,21 @@ def extract_link_from_cell(cell):
 def convert_html_entities(text):
     if not isinstance(text, str): return text
     text = html.unescape(text)
-    custom_replacements = { '"': '\"', '"': '\"', ''': "'", ''': "'", 'Â': '', 'â': '', '€': '', '™': '' }
+    custom_replacements = { '“': '\"', '”': '\"', '‘': "'", '’': "'", 'Â': '', 'â': '', '€': '', '™': '' }
     for entity, char in custom_replacements.items():
         text = text.replace(entity, char)
     return text
 
 def normalize_title_for_comparison(title):
-    """Normaliza títulos para comparación, ignorando diferencias de puntuación y formato"""
     if not isinstance(title, str): return ""
     title = convert_html_entities(title)
-    
-    # Eliminar todas las comillas (simples y dobles, incluidas las tipográficas)
-    # Usar replace en lugar de regex para caracteres especiales
-    title = title.replace('"', '').replace('"', '').replace('"', '')  # Comillas dobles
-    title = title.replace("'", '').replace(''', '').replace(''', '')  # Comillas simples
-    
-    # Reemplazar todos los signos de puntuación con espacios
-    title = re.sub(r'[^\w\s]', ' ', title)
-    
-    # Convertir múltiples espacios en uno solo y aplicar minúsculas
-    title = re.sub(r'\s+', ' ', title).lower().strip()
-    
-    return title
+    return re.sub(r'\W+', ' ', title).lower().strip()
 
 def clean_title_for_output(title):
-    """Limpia títulos para la salida, manteniendo el contenido completo"""
     if not isinstance(title, str): return ""
-    
-    # Convertir entidades HTML
     title = convert_html_entities(title)
-    
-    # Normalizar espacios múltiples a un solo espacio
-    title = re.sub(r'\s+', ' ', title)
-    
-    # Eliminar espacios antes y después de ciertos símbolos de puntuación
-    title = re.sub(r'\s*:\s*', ': ', title)
-    title = re.sub(r'\s*;\s*', '; ', title)
-    title = re.sub(r'\s*,\s*', ', ', title)
-    title = re.sub(r'\s*\|\s*', ' | ', title)
-    
-    # Normalizar comillas tipográficas a comillas simples
-    # Usar replace en lugar de regex para evitar problemas con caracteres especiales
-    title = title.replace('"', '"').replace('"', '"')  # Comillas dobles tipográficas
-    title = title.replace(''', "'").replace(''', "'")  # Comillas simples tipográficas
-    
-    return title.strip()
+    title = re.sub(r'\s*[|-].*$', '', title).strip()
+    return title
 
 def corregir_texto(text):
     if not isinstance(text, str): return text
@@ -171,8 +141,6 @@ def run_full_process(dossier_file, config_file):
     df['Fecha'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce').dt.normalize()
     
     df['seccion_priority'] = df['Sección - Programa'].isnull() | (df['Sección - Programa'] == '')
-    
-    # Primero detectamos duplicados exactos (mismo día, misma hora si no es Internet)
     df['dup_hora'] = np.where(df['Tipo de Medio'] == 'Internet', 'IGNORE_TIME', df['Hora'])
     
     dup_cols_exact = ['titulo_norm', 'Medio', 'Fecha', 'Menciones - Empresa', 'dup_hora']
@@ -181,15 +149,6 @@ def run_full_process(dossier_file, config_file):
     df.sort_values(by=sort_by_cols, ascending=ascending_order, inplace=True)
     exact_duplicates_mask = df.duplicated(subset=dup_cols_exact, keep='first')
     df.loc[exact_duplicates_mask, 'Mantener'] = 'Eliminar'
-    
-    # Luego detectamos duplicados del mismo día con diferente hora (para todos los medios)
-    # Esto captura casos donde el mismo contenido aparece en diferentes horas del día
-    dup_cols_same_day = ['titulo_norm', 'Medio', 'Fecha', 'Menciones - Empresa']
-    df.sort_values(by=dup_cols_same_day + ['Hora', 'seccion_priority'], 
-                   ascending=[True, True, True, True, True, False], inplace=True)
-    same_day_duplicates_mask = df.duplicated(subset=dup_cols_same_day, keep='first')
-    df.loc[same_day_duplicates_mask & (df['Mantener'] == 'Conservar'), 'Mantener'] = 'Eliminar'
-    
     df.sort_index(inplace=True)
     
     df_internet_to_check = df[(df['Mantener'] == 'Conservar') & (is_internet)].copy()
@@ -221,17 +180,6 @@ def run_full_process(dossier_file, config_file):
     col2.metric("Filas Marcadas como Duplicadas", dups_count)
     col3.metric("Filas Únicas", len(df_final) - dups_count)
     
-    # Mostrar ejemplos de títulos normalizados para verificación
-    with st.expander("🔍 Ver ejemplos de normalización de títulos (para verificación)"):
-        sample_df = df_final[['Título', 'titulo_norm', 'Mantener']].head(20)
-        st.dataframe(sample_df, use_container_width=True)
-        
-        # Mostrar específicamente los duplicados detectados
-        duplicates = df_final[df_final['Mantener'] == 'Eliminar'][['Título', 'Medio', 'Fecha', 'Hora', 'Menciones - Empresa']].head(10)
-        if not duplicates.empty:
-            st.write("**Ejemplos de duplicados detectados:**")
-            st.dataframe(duplicates, use_container_width=True)
-    
     excel_data = to_excel_from_df(df_final, final_order)
     st.download_button(label="📥 Descargar Archivo Limpio y Mapeado", data=excel_data, file_name=f"Dossier_Limpio_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.openxmlformats-officedocument.sheet")
 
@@ -248,28 +196,8 @@ def run_full_process(dossier_file, config_file):
 # ==============================================================================
 # INTERFAZ PRINCIPAL DE STREAMLIT
 # ==============================================================================
-st.title("🚀 Procesador de Dossiers (Lite) v1.7")
+st.title("🚀 Procesador de Dossiers (Lite) v1.6")
 st.markdown("Una herramienta para limpiar, deduplicar y mapear dossieres de noticias.")
-
-# Añadir sección de cambios
-with st.expander("📝 Cambios en v1.7"):
-    st.markdown("""
-    **Mejoras en limpieza de títulos:**
-    - Se mantiene el título completo sin cortar contenido
-    - Se normalizan espacios múltiples y alrededor de puntuación
-    - Se convierten comillas tipográficas a estándar
-    - Se limpian entidades HTML
-    
-    **Mejoras en detección de duplicados:**
-    - Detecta como duplicados títulos que solo difieren en:
-      - Comillas (simples, dobles, tipográficas)
-      - Espacios extras
-      - Puntuación menor
-      - **Hora diferente (mismo día, mismo título, mismo medio)**
-    - Ejemplo: "Título": subtítulo = Título: subtítulo (son duplicados)
-    - Mantiene la primera aparición (por hora) y marca las demás como duplicadas
-    """)
-
 st.info("**Instrucciones:**\n\n1. Prepara tu archivo **Dossier** principal y tu archivo **`Configuracion.xlsx`**.\n2. Sube ambos archivos juntos en el área de abajo.\n3. Haz clic en 'Iniciar Proceso'.")
 with st.expander("Ver estructura requerida para `Configuracion.xlsx`"):
     st.markdown("- **`Regiones`**: Columna A (Medio), Columna B (Región).\n- **`Internet`**: Columna A (Medio Original), Columna B (Medio Mapeado).")

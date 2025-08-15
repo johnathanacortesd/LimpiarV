@@ -45,6 +45,8 @@ def convert_html_entities(text):
         '&#xD3;': 'Ó',  # Ó
         '&#xDA;': 'Ú',  # Ú
         '&#xD1;': 'Ñ',  # Ñ
+        '&#xC7;': 'Ç',  # Ç
+        '&#xE7;': 'ç',  # ç
     }
     
     # Reemplazar entidades HTML numéricas hexadecimales
@@ -104,17 +106,18 @@ def normalize_title_for_comparison(title):
 
 def clean_title_for_output(title):
     """
-    Limpia el título removiendo entidades HTML mal codificadas,
-    pero SIN cortar el texto en guiones o barras verticales.
+    ÚNICAMENTE limpia entidades HTML mal codificadas.
+    NO corta, NO modifica, NO remueve ninguna parte del título.
+    Solo convierte caracteres como &#xF3; a ó
     """
     if not isinstance(title, str): 
         return ""
     
-    # Solo limpiar entidades HTML, NO cortar el título
+    # SOLO limpiar entidades HTML - NO tocar nada más
     title = convert_html_entities(title)
     
-    # Limpiar espacios múltiples
-    title = re.sub(r'\s+', ' ', title).strip()
+    # Solo quitar espacios al inicio y final, NO espacios múltiples internos
+    title = title.strip()
     
     return title
 
@@ -191,6 +194,7 @@ def run_full_process(dossier_file, config_file):
     for col in original_headers:
         if col not in df.columns: df[col] = None
     
+    # APLICAR LA LIMPIEZA CORREGIDA - SOLO ENTIDADES HTML, NO CORTAR
     df['Título'] = df['Título'].astype(str).apply(clean_title_for_output)
     df['Resumen - Aclaracion'] = df['Resumen - Aclaracion'].astype(str).apply(corregir_texto)
 
@@ -249,7 +253,7 @@ def run_full_process(dossier_file, config_file):
     df.loc[df['Mantener'] == 'Eliminar', ['Tono', 'Tema', 'Temas Generales - Tema']] = 'Duplicada'
     
     st.balloons()
-    progress_text.success("¡Proceso de limpieza completado!")
+    progress_text.success("¡Proceso de limpieza completado! Los títulos se mantienen completos.")
 
     final_order = ["ID Noticia", "Fecha", "Hora", "Medio", "Tipo de Medio", "Sección - Programa", "Región", "Título", "Autor - Conductor", "Nro. Pagina", "Dimensión", "Duración - Nro. Caracteres", "CPE", "Tier", "Audiencia", "Tono", "Tema", "Temas Generales - Tema", "Resumen - Aclaracion", "Link Nota", "Link (Streaming - Imagen)", "Menciones - Empresa"]
     df_final = df.copy()
@@ -280,6 +284,10 @@ def run_full_process(dossier_file, config_file):
 st.title("🚀 Procesador de Dossiers (Lite) v1.6")
 st.markdown("Una herramienta para limpiar, deduplicar y mapear dossieres de noticias.")
 st.info("**Instrucciones:**\n\n1. Prepara tu archivo **Dossier** principal y tu archivo **`Configuracion.xlsx`**.\n2. Sube ambos archivos juntos en el área de abajo.\n3. Haz clic en 'Iniciar Proceso'.")
+
+# Información adicional sobre la mejora
+st.success("✅ **MEJORADO**: Los títulos ahora se mantienen completos. Solo se limpian entidades HTML como &#xF3; → ó")
+
 with st.expander("Ver estructura requerida para `Configuracion.xlsx`"):
     st.markdown("- **`Regiones`**: Columna A (Medio), Columna B (Región).\n- **`Internet`**: Columna A (Medio Original), Columna B (Medio Mapeado).")
 

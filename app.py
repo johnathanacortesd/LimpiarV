@@ -32,7 +32,9 @@ def normalize_title_for_comparison(title):
     title = convert_html_entities(title)
     
     # Eliminar todas las comillas (simples y dobles, incluidas las tipográficas)
-    title = re.sub(r'["\'"''""]', '', title)
+    # Usar replace en lugar de regex para caracteres especiales
+    title = title.replace('"', '').replace('"', '').replace('"', '')  # Comillas dobles
+    title = title.replace("'", '').replace(''', '').replace(''', '')  # Comillas simples
     
     # Reemplazar todos los signos de puntuación con espacios
     title = re.sub(r'[^\w\s]', ' ', title)
@@ -59,8 +61,9 @@ def clean_title_for_output(title):
     title = re.sub(r'\s*\|\s*', ' | ', title)
     
     # Normalizar comillas tipográficas a comillas simples
-    title = re.sub(r'[""]', '"', title)
-    title = re.sub(r'['']', "'", title)
+    # Usar replace en lugar de regex para evitar problemas con caracteres especiales
+    title = title.replace('"', '"').replace('"', '"')  # Comillas dobles tipográficas
+    title = title.replace(''', "'").replace(''', "'")  # Comillas simples tipográficas
     
     return title.strip()
 

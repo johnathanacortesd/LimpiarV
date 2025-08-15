@@ -8,7 +8,7 @@ import html
 import numpy as np
 
 # --- Configuración de la página ---
-st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.6", layout="wide")
+st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.7", layout="wide")
 
 # ==============================================================================
 # SECCIÓN DE FUNCIONES AUXILIARES
@@ -21,21 +21,43 @@ def extract_link_from_cell(cell):
 def convert_html_entities(text):
     if not isinstance(text, str): return text
     text = html.unescape(text)
-    custom_replacements = { '“': '\"', '”': '\"', '‘': "'", '’': "'", 'Â': '', 'â': '', '€': '', '™': '' }
+    custom_replacements = { '"': '\"', '"': '\"', ''': "'", ''': "'", 'Â': '', 'â': '', '€': '', '™': '' }
     for entity, char in custom_replacements.items():
         text = text.replace(entity, char)
     return text
 
 def normalize_title_for_comparison(title):
+    """Normaliza títulos para comparación, ignorando diferencias de puntuación y formato"""
     if not isinstance(title, str): return ""
     title = convert_html_entities(title)
-    return re.sub(r'\W+', ' ', title).lower().strip()
+    
+    # Eliminar todas las comillas (simples y dobles, incluidas las tipográficas)
+    title = re.sub(r'["\'"''""]', '', title)
+    
+    # Reemplazar todos los signos de puntuación con espacios
+    title = re.sub(r'[^\w\s]', ' ', title)
+    
+    # Convertir múltiples espacios en uno solo y aplicar minúsculas
+    title = re.sub(r'\s+', ' ', title).lower().strip()
+    
+    return title
 
 def clean_title_for_output(title):
+    """Limpia títulos para la salida, manteniendo formato legible"""
     if not isinstance(title, str): return ""
     title = convert_html_entities(title)
-    title = re.sub(r'\s*[|-].*$', '', title).strip()
-    return title
+    
+    # Símbolos donde SÍ cortamos el título (todos excepto | y paréntesis)
+    # Incluye: - : ; [ ] { } < > / \ ? ! @ # $ % ^ & * + = ~ ` " '
+    cut_symbols = r'[\-:;\[\]{}<>/\\?!@#$%^&*+=~`"\']'
+    
+    # Buscar el primer símbolo de corte
+    match = re.search(cut_symbols, title)
+    if match:
+        # Cortar antes del símbolo encontrado
+        title = title[:match.start()].strip()
+    
+    return title.strip()
 
 def corregir_texto(text):
     if not isinstance(text, str): return text
@@ -180,6 +202,11 @@ def run_full_process(dossier_file, config_file):
     col2.metric("Filas Marcadas como Duplicadas", dups_count)
     col3.metric("Filas Únicas", len(df_final) - dups_count)
     
+    # Mostrar ejemplos de títulos normalizados para verificación
+    with st.expander("🔍 Ver ejemplos de normalización de títulos (para verificación)"):
+        sample_df = df_final[['Título', 'titulo_norm']].head(10)
+        st.dataframe(sample_df, use_container_width=True)
+    
     excel_data = to_excel_from_df(df_final, final_order)
     st.download_button(label="📥 Descargar Archivo Limpio y Mapeado", data=excel_data, file_name=f"Dossier_Limpio_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.openxmlformats-officedocument.sheet")
 
@@ -196,8 +223,23 @@ def run_full_process(dossier_file, config_file):
 # ==============================================================================
 # INTERFAZ PRINCIPAL DE STREAMLIT
 # ==============================================================================
-st.title("🚀 Procesador de Dossiers (Lite) v1.6")
+st.title("🚀 Procesador de Dossiers (Lite) v1.7")
 st.markdown("Una herramienta para limpiar, deduplicar y mapear dossieres de noticias.")
+
+# Añadir sección de cambios
+with st.expander("📝 Cambios en v1.7"):
+    st.markdown("""
+    **Mejoras en limpieza de títulos:**
+    - Se mantienen patrones especiales como "EN VIVO |", "DIRECTO |", etc. al inicio del título
+    - Se corta el título en paréntesis `(` además de `|` y `-`
+    - Mejor manejo de casos especiales
+    
+    **Mejoras en detección de duplicados:**
+    - Se ignoran diferencias de comillas (simples, dobles, tipográficas)
+    - Mejor normalización de puntuación para comparación
+    - Mayor precisión en la identificación de títulos similares
+    """)
+
 st.info("**Instrucciones:**\n\n1. Prepara tu archivo **Dossier** principal y tu archivo **`Configuracion.xlsx`**.\n2. Sube ambos archivos juntos en el área de abajo.\n3. Haz clic en 'Iniciar Proceso'.")
 with st.expander("Ver estructura requerida para `Configuracion.xlsx`"):
     st.markdown("- **`Regiones`**: Columna A (Medio), Columna B (Región).\n- **`Internet`**: Columna A (Medio Original), Columna B (Medio Mapeado).")

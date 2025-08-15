@@ -43,19 +43,24 @@ def normalize_title_for_comparison(title):
     return title
 
 def clean_title_for_output(title):
-    """Limpia títulos para la salida, manteniendo formato legible"""
+    """Limpia títulos para la salida, manteniendo el contenido completo"""
     if not isinstance(title, str): return ""
+    
+    # Convertir entidades HTML
     title = convert_html_entities(title)
     
-    # Símbolos donde SÍ cortamos el título (todos excepto | y paréntesis)
-    # Incluye: - : ; [ ] { } < > / \ ? ! @ # $ % ^ & * + = ~ ` " '
-    cut_symbols = r'[\-:;\[\]{}<>/\\?!@#$%^&*+=~`"\']'
+    # Normalizar espacios múltiples a un solo espacio
+    title = re.sub(r'\s+', ' ', title)
     
-    # Buscar el primer símbolo de corte
-    match = re.search(cut_symbols, title)
-    if match:
-        # Cortar antes del símbolo encontrado
-        title = title[:match.start()].strip()
+    # Eliminar espacios antes y después de ciertos símbolos de puntuación
+    title = re.sub(r'\s*:\s*', ': ', title)
+    title = re.sub(r'\s*;\s*', '; ', title)
+    title = re.sub(r'\s*,\s*', ', ', title)
+    title = re.sub(r'\s*\|\s*', ' | ', title)
+    
+    # Normalizar comillas tipográficas a comillas simples
+    title = re.sub(r'[""]', '"', title)
+    title = re.sub(r'['']', "'", title)
     
     return title.strip()
 
@@ -163,6 +168,8 @@ def run_full_process(dossier_file, config_file):
     df['Fecha'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce').dt.normalize()
     
     df['seccion_priority'] = df['Sección - Programa'].isnull() | (df['Sección - Programa'] == '')
+    
+    # Primero detectamos duplicados exactos (mismo día, misma hora si no es Internet)
     df['dup_hora'] = np.where(df['Tipo de Medio'] == 'Internet', 'IGNORE_TIME', df['Hora'])
     
     dup_cols_exact = ['titulo_norm', 'Medio', 'Fecha', 'Menciones - Empresa', 'dup_hora']
@@ -171,6 +178,15 @@ def run_full_process(dossier_file, config_file):
     df.sort_values(by=sort_by_cols, ascending=ascending_order, inplace=True)
     exact_duplicates_mask = df.duplicated(subset=dup_cols_exact, keep='first')
     df.loc[exact_duplicates_mask, 'Mantener'] = 'Eliminar'
+    
+    # Luego detectamos duplicados del mismo día con diferente hora (para todos los medios)
+    # Esto captura casos donde el mismo contenido aparece en diferentes horas del día
+    dup_cols_same_day = ['titulo_norm', 'Medio', 'Fecha', 'Menciones - Empresa']
+    df.sort_values(by=dup_cols_same_day + ['Hora', 'seccion_priority'], 
+                   ascending=[True, True, True, True, True, False], inplace=True)
+    same_day_duplicates_mask = df.duplicated(subset=dup_cols_same_day, keep='first')
+    df.loc[same_day_duplicates_mask & (df['Mantener'] == 'Conservar'), 'Mantener'] = 'Eliminar'
+    
     df.sort_index(inplace=True)
     
     df_internet_to_check = df[(df['Mantener'] == 'Conservar') & (is_internet)].copy()
@@ -204,8 +220,14 @@ def run_full_process(dossier_file, config_file):
     
     # Mostrar ejemplos de títulos normalizados para verificación
     with st.expander("🔍 Ver ejemplos de normalización de títulos (para verificación)"):
-        sample_df = df_final[['Título', 'titulo_norm']].head(10)
+        sample_df = df_final[['Título', 'titulo_norm', 'Mantener']].head(20)
         st.dataframe(sample_df, use_container_width=True)
+        
+        # Mostrar específicamente los duplicados detectados
+        duplicates = df_final[df_final['Mantener'] == 'Eliminar'][['Título', 'Medio', 'Fecha', 'Hora', 'Menciones - Empresa']].head(10)
+        if not duplicates.empty:
+            st.write("**Ejemplos de duplicados detectados:**")
+            st.dataframe(duplicates, use_container_width=True)
     
     excel_data = to_excel_from_df(df_final, final_order)
     st.download_button(label="📥 Descargar Archivo Limpio y Mapeado", data=excel_data, file_name=f"Dossier_Limpio_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.openxmlformats-officedocument.sheet")
@@ -230,14 +252,19 @@ st.markdown("Una herramienta para limpiar, deduplicar y mapear dossieres de noti
 with st.expander("📝 Cambios en v1.7"):
     st.markdown("""
     **Mejoras en limpieza de títulos:**
-    - Se mantienen patrones especiales como "EN VIVO |", "DIRECTO |", etc. al inicio del título
-    - Se corta el título en paréntesis `(` además de `|` y `-`
-    - Mejor manejo de casos especiales
+    - Se mantiene el título completo sin cortar contenido
+    - Se normalizan espacios múltiples y alrededor de puntuación
+    - Se convierten comillas tipográficas a estándar
+    - Se limpian entidades HTML
     
     **Mejoras en detección de duplicados:**
-    - Se ignoran diferencias de comillas (simples, dobles, tipográficas)
-    - Mejor normalización de puntuación para comparación
-    - Mayor precisión en la identificación de títulos similares
+    - Detecta como duplicados títulos que solo difieren en:
+      - Comillas (simples, dobles, tipográficas)
+      - Espacios extras
+      - Puntuación menor
+      - **Hora diferente (mismo día, mismo título, mismo medio)**
+    - Ejemplo: "Título": subtítulo = Título: subtítulo (son duplicados)
+    - Mantiene la primera aparición (por hora) y marca las demás como duplicadas
     """)
 
 st.info("**Instrucciones:**\n\n1. Prepara tu archivo **Dossier** principal y tu archivo **`Configuracion.xlsx`**.\n2. Sube ambos archivos juntos en el área de abajo.\n3. Haz clic en 'Iniciar Proceso'.")

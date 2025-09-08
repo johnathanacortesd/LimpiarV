@@ -6,12 +6,213 @@ import io
 import re
 import html
 import numpy as np
+from urllib.parse import urlparse
 
 # --- Configuración de la página ---
-st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.6", layout="wide")
+st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.7", layout="wide")
 
 # ==============================================================================
-# SECCIÓN DE FUNCIONES AUXILIARES
+# NUEVAS FUNCIONES PARA EXTRACCIÓN DE DOMINIO Y REGIÓN
+# ==============================================================================
+def format_domain_name(url):
+    """
+    Extrae y formatea el nombre del dominio de una URL
+    Ejemplo: https://www.lavibrante.com -> Lavibrante.com
+    """
+    if not url:
+        return ''
+    
+    try:
+        # Parsear la URL
+        parsed = urlparse(url)
+        domain = parsed.netloc
+        
+        # Remover 'www.' si está presente
+        if domain.startswith('www.'):
+            domain = domain[4:]
+        
+        # Capitalizar la primera letra
+        if domain:
+            # Separar el nombre del dominio de la extensión
+            parts = domain.split('.')
+            if len(parts) >= 2:
+                # Capitalizar solo la primera parte
+                parts[0] = parts[0].capitalize()
+                domain = '.'.join(parts)
+            else:
+                domain = domain.capitalize()
+        
+        return domain
+    except:
+        return ''
+
+def get_country_from_domain(url):
+    """
+    Determina el país/región basándose en el dominio de la URL
+    """
+    if not url:
+        return ''
+    
+    try:
+        # Parsear la URL
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower()
+        
+        # Remover www. si está presente
+        if domain.startswith('www.'):
+            domain = domain[4:]
+        
+        # Diccionario de extensiones de dominio por país
+        domain_countries = {
+            # América Latina
+            '.ar': 'Argentina',
+            '.bo': 'Bolivia',
+            '.br': 'Brasil',
+            '.cl': 'Chile',
+            '.co': 'Colombia',
+            '.cr': 'Costa Rica',
+            '.cu': 'Cuba',
+            '.do': 'República Dominicana',
+            '.ec': 'Ecuador',
+            '.sv': 'El Salvador',
+            '.gt': 'Guatemala',
+            '.hn': 'Honduras',
+            '.mx': 'México',
+            '.ni': 'Nicaragua',
+            '.pa': 'Panamá',
+            '.py': 'Paraguay',
+            '.pe': 'Perú',
+            '.pr': 'Puerto Rico',
+            '.uy': 'Uruguay',
+            '.ve': 'Venezuela',
+            
+            # Europa
+            '.es': 'España',
+            '.fr': 'Francia',
+            '.de': 'Alemania',
+            '.it': 'Italia',
+            '.pt': 'Portugal',
+            '.uk': 'Reino Unido',
+            '.gb': 'Reino Unido',
+            '.nl': 'Países Bajos',
+            '.be': 'Bélgica',
+            '.ch': 'Suiza',
+            '.at': 'Austria',
+            '.se': 'Suecia',
+            '.no': 'Noruega',
+            '.dk': 'Dinamarca',
+            '.fi': 'Finlandia',
+            '.pl': 'Polonia',
+            '.ru': 'Rusia',
+            '.gr': 'Grecia',
+            '.ie': 'Irlanda',
+            
+            # Asia
+            '.cn': 'China',
+            '.jp': 'Japón',
+            '.kr': 'Corea del Sur',
+            '.in': 'India',
+            '.sg': 'Singapur',
+            '.hk': 'Hong Kong',
+            '.tw': 'Taiwán',
+            '.th': 'Tailandia',
+            '.my': 'Malasia',
+            '.id': 'Indonesia',
+            '.ph': 'Filipinas',
+            '.vn': 'Vietnam',
+            
+            # Oceanía
+            '.au': 'Australia',
+            '.nz': 'Nueva Zelanda',
+            
+            # África
+            '.za': 'Sudáfrica',
+            '.eg': 'Egipto',
+            '.ng': 'Nigeria',
+            '.ke': 'Kenia',
+            '.ma': 'Marruecos',
+            
+            # Norteamérica
+            '.ca': 'Canadá',
+            '.us': 'Estados Unidos',
+            
+            # Medio Oriente
+            '.ae': 'Emiratos Árabes Unidos',
+            '.sa': 'Arabia Saudita',
+            '.il': 'Israel',
+            '.tr': 'Turquía',
+            '.ir': 'Irán'
+        }
+        
+        # Primero verificar extensiones de dominio específicas de país
+        for ext, country in domain_countries.items():
+            if domain.endswith(ext):
+                return country
+        
+        # Verificar subdominios .com.xx
+        com_extensions = {
+            '.com.ar': 'Argentina',
+            '.com.mx': 'México',
+            '.com.br': 'Brasil',
+            '.com.co': 'Colombia',
+            '.com.pe': 'Perú',
+            '.com.ve': 'Venezuela',
+            '.com.ec': 'Ecuador',
+            '.com.uy': 'Uruguay',
+            '.com.py': 'Paraguay',
+            '.com.bo': 'Bolivia',
+            '.com.cl': 'Chile',
+            '.com.gt': 'Guatemala',
+            '.com.do': 'República Dominicana',
+            '.com.pa': 'Panamá',
+            '.com.ni': 'Nicaragua',
+            '.com.sv': 'El Salvador',
+            '.com.hn': 'Honduras'
+        }
+        
+        for ext, country in com_extensions.items():
+            if ext in domain:
+                return country
+        
+        # Si es .com, .org, .net sin indicador de país específico
+        if any(domain.endswith(ext) for ext in ['.com', '.org', '.net', '.info', '.biz']):
+            return 'Internacional'
+        
+        # Si es .edu o .gov generalmente es de Estados Unidos
+        if domain.endswith('.edu') or domain.endswith('.gov'):
+            return 'Estados Unidos'
+        
+        return 'No identificado'
+        
+    except:
+        return ''
+
+def clean_and_format_online_media(medio_name, link_url):
+    """
+    Limpia y formatea los nombres de medios online
+    Ejemplo: "Ser Peruano (Online)" -> "Serperuano.com" si tiene link válido
+    """
+    if not medio_name:
+        return medio_name
+    
+    medio_str = str(medio_name).strip()
+    
+    # Si tiene "(Online)" al final y tenemos un link válido
+    if '(online)' in medio_str.lower() and link_url:
+        domain_name = format_domain_name(link_url)
+        if domain_name:
+            # Remover "(Online)" y cualquier espacio extra
+            base_name = re.sub(r'\s*\(online\)\s*', '', medio_str, flags=re.IGNORECASE).strip()
+            # Si el dominio ya está en el nombre, no duplicarlo
+            if domain_name.lower() not in base_name.lower():
+                return f"{base_name} - {domain_name}"
+            else:
+                return base_name
+    
+    return medio_str
+
+# ==============================================================================
+# SECCIÓN DE FUNCIONES AUXILIARES (EXISTENTES)
 # ==============================================================================
 def extract_link_from_cell(cell):
     if cell.hyperlink and cell.hyperlink.target:
@@ -153,7 +354,7 @@ def to_excel_from_df(df, final_order):
     return output.getvalue()
 
 # ==============================================================================
-# LÓGICA DE PROCESAMIENTO PRINCIPAL
+# LÓGICA DE PROCESAMIENTO PRINCIPAL (MEJORADA)
 # ==============================================================================
 def run_full_process(dossier_file, config_file):
     
@@ -204,22 +405,44 @@ def run_full_process(dossier_file, config_file):
     is_print = df['Tipo de Medio'].isin(['Prensa', 'Revista'])
     is_broadcast = df['Tipo de Medio'].isin(['Radio', 'Televisión'])
     
+    # Intercambiar links para medios de Internet
     df.loc[is_internet, ['Link Nota', 'Link (Streaming - Imagen)']] = df.loc[is_internet, ['Link (Streaming - Imagen)', 'Link Nota']].values
     cond_copy = is_print & df['Link Nota'].isnull() & df['Link (Streaming - Imagen)'].notnull()
     df.loc[cond_copy, 'Link Nota'] = df.loc[cond_copy, 'Link (Streaming - Imagen)']
     df.loc[is_print, 'Link (Streaming - Imagen)'] = None
     df.loc[is_broadcast, 'Link (Streaming - Imagen)'] = None
     
-    # --- INICIO DE LA LÓGICA "CORTAR Y PEGAR" ---
+    # LÓGICA "CORTAR Y PEGAR" para Duración - Nro. Caracteres
     if 'Duración - Nro. Caracteres' in df.columns and 'Dimensión' in df.columns:
-        # 1. Copiar el valor a la columna Dimensión para medios broadcast
         df.loc[is_broadcast, 'Dimensión'] = df.loc[is_broadcast, 'Duración - Nro. Caracteres']
-        # 2. Limpiar (cortar) el valor de la columna original para esos mismos medios
         df.loc[is_broadcast, 'Duración - Nro. Caracteres'] = np.nan
-    # --- FIN DE LA LÓGICA "CORTAR Y PEGAR" ---
     
+    # === NUEVA LÓGICA MEJORADA PARA REGIÓN Y MEDIO ===
+    # Primero intentar mapear región con el archivo de configuración
     df['Región'] = df['Medio'].astype(str).str.lower().str.strip().map(region_map)
-    df.loc[is_internet, 'Medio'] = df.loc[is_internet, 'Medio'].astype(str).str.lower().str.strip().map(internet_map).fillna(df.loc[is_internet, 'Medio'])
+    
+    # Para medios de Internet, aplicar lógica adicional
+    internet_indices = df.index[is_internet]
+    for idx in internet_indices:
+        medio_original = str(df.loc[idx, 'Medio'])
+        link_url = df.loc[idx, 'Link Nota'] if pd.notna(df.loc[idx, 'Link Nota']) else df.loc[idx, 'Link (Streaming - Imagen)']
+        
+        # Intentar mapear el medio usando el archivo de configuración
+        medio_mapped = internet_map.get(medio_original.lower().strip())
+        
+        if medio_mapped:
+            # Si encontramos un mapeo, usarlo
+            df.loc[idx, 'Medio'] = medio_mapped
+        else:
+            # Si no hay mapeo y tiene "(Online)", formatear usando el dominio
+            if link_url:
+                df.loc[idx, 'Medio'] = clean_and_format_online_media(medio_original, link_url)
+            
+        # Si no se encontró región en el mapeo y tenemos un link, intentar detectarla del dominio
+        if pd.isna(df.loc[idx, 'Región']) and link_url:
+            detected_region = get_country_from_domain(link_url)
+            if detected_region and detected_region not in ['No identificado', '']:
+                df.loc[idx, 'Región'] = detected_region
 
     progress_text.info("Paso 4/4: Detectando duplicados y generando resultados...")
     df['titulo_norm'] = df['Título'].apply(normalize_title_for_comparison)
@@ -253,7 +476,7 @@ def run_full_process(dossier_file, config_file):
     df.loc[df['Mantener'] == 'Eliminar', ['Tono', 'Tema', 'Temas Generales - Tema']] = 'Duplicada'
     
     st.balloons()
-    progress_text.success("¡Proceso de limpieza completado! Los títulos se mantienen completos.")
+    progress_text.success("¡Proceso de limpieza completado! Los títulos se mantienen completos y los medios online están formateados.")
 
     final_order = ["ID Noticia", "Fecha", "Hora", "Medio", "Tipo de Medio", "Sección - Programa", "Región", "Título", "Autor - Conductor", "Nro. Pagina", "Dimensión", "Duración - Nro. Caracteres", "CPE", "Tier", "Audiencia", "Tono", "Tema", "Temas Generales - Tema", "Resumen - Aclaracion", "Link Nota", "Link (Streaming - Imagen)", "Menciones - Empresa"]
     df_final = df.copy()
@@ -264,6 +487,24 @@ def run_full_process(dossier_file, config_file):
     dups_count = (df_final['Mantener'] == 'Eliminar').sum()
     col2.metric("Filas Marcadas como Duplicadas", dups_count)
     col3.metric("Filas Únicas", len(df_final) - dups_count)
+    
+    # Mostrar estadísticas de detección de región
+    with st.expander("📍 Ver estadísticas de detección de región"):
+        internet_df = df_final[df_final['Tipo de Medio'] == 'Internet']
+        if not internet_df.empty:
+            total_internet = len(internet_df)
+            with_region = internet_df['Región'].notna().sum()
+            without_region = total_internet - with_region
+            
+            col1, col2 = st.columns(2)
+            col1.metric("Medios Internet con región detectada", f"{with_region} ({with_region/total_internet*100:.1f}%)")
+            col2.metric("Medios Internet sin región", f"{without_region} ({without_region/total_internet*100:.1f}%)")
+            
+            # Mostrar distribución de regiones
+            if with_region > 0:
+                st.write("**Distribución de regiones detectadas:**")
+                region_counts = internet_df['Región'].value_counts().head(10)
+                st.bar_chart(region_counts)
     
     excel_data = to_excel_from_df(df_final, final_order)
     st.download_button(label="📥 Descargar Archivo Limpio y Mapeado", data=excel_data, file_name=f"Dossier_Limpio_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.openxmlformats-officedocument.sheet")
@@ -281,15 +522,26 @@ def run_full_process(dossier_file, config_file):
 # ==============================================================================
 # INTERFAZ PRINCIPAL DE STREAMLIT
 # ==============================================================================
-st.title("🚀 Procesador de Dossiers (Lite) v1.6")
+st.title("🚀 Procesador de Dossiers (Lite) v1.7")
 st.markdown("Una herramienta para limpiar, deduplicar y mapear dossieres de noticias.")
 st.info("**Instrucciones:**\n\n1. Prepara tu archivo **Dossier** principal y tu archivo **`Configuracion.xlsx`**.\n2. Sube ambos archivos juntos en el área de abajo.\n3. Haz clic en 'Iniciar Proceso'.")
 
-# Información adicional sobre la mejora
-st.success("✅ **MEJORADO**: Los títulos ahora se mantienen completos. Solo se limpian entidades HTML como &#xF3; → ó")
+# Información adicional sobre las mejoras
+st.success("""✅ **MEJORAS v1.7**: 
+- Los títulos se mantienen completos (solo se limpian entidades HTML)
+- Detección automática de región para medios online usando dominios
+- Formateo automático de medios online: 'Medio (Online)' → 'Medio - Dominio.com'
+- Si no encuentra región en el mapeo, intenta detectarla del dominio del link""")
 
 with st.expander("Ver estructura requerida para `Configuracion.xlsx`"):
-    st.markdown("- **`Regiones`**: Columna A (Medio), Columna B (Región).\n- **`Internet`**: Columna A (Medio Original), Columna B (Medio Mapeado).")
+    st.markdown("""
+    - **`Regiones`**: Columna A (Medio), Columna B (Región).
+    - **`Internet`**: Columna A (Medio Original), Columna B (Medio Mapeado).
+    
+    **Nota:** Si un medio online no está en estos archivos, el sistema intentará:
+    1. Formatear el nombre usando el dominio del link
+    2. Detectar la región automáticamente basándose en la extensión del dominio (.pe = Perú, .cl = Chile, etc.)
+    """)
 
 uploaded_files = st.file_uploader("Arrastra y suelta tus archivos aquí (Dossier y Configuracion)", type=["xlsx"], accept_multiple_files=True)
 dossier_file, config_file = None, None

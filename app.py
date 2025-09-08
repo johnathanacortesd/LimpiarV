@@ -9,7 +9,7 @@ import numpy as np
 from urllib.parse import urlparse
 
 # --- Configuración de la página ---
-st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.7", layout="wide")
+st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.8", layout="wide")
 
 # ==============================================================================
 # NUEVAS FUNCIONES PARA EXTRACCIÓN DE DOMINIO Y REGIÓN
@@ -547,9 +547,10 @@ st.info("**Instrucciones:**\n\n1. Prepara tu archivo **Dossier** principal y tu 
 # Información adicional sobre las mejoras
 st.success("""✅ **MEJORAS v1.7**: 
 - Los títulos se mantienen completos (solo se limpian entidades HTML)
-- Detección automática de región para medios online usando dominios
+- Detección automática de región para medios online usando dominios de Link Nota
 - Formateo automático de medios online: 'Medio (Online)' → 'Medio - Dominio.com'
-- Si no encuentra región en el mapeo, intenta detectarla del dominio del link""")
+- Si no encuentra región en el mapeo, intenta detectarla del dominio del link
+- Para medios Internet, usa Link Nota (donde están los enlaces web después del procesamiento)""")
 
 with st.expander("Ver estructura requerida para `Configuracion.xlsx`"):
     st.markdown("""

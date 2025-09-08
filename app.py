@@ -9,7 +9,7 @@ import numpy as np
 from urllib.parse import urlparse
 
 # --- Configuración de la página ---
-st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.8", layout="wide")
+st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.7", layout="wide")
 
 # ==============================================================================
 # NUEVAS FUNCIONES PARA EXTRACCIÓN DE DOMINIO Y REGIÓN
@@ -501,6 +501,12 @@ def run_full_process(dossier_file, config_file):
             col1, col2 = st.columns(2)
             col1.metric("Con región detectada", f"{with_region} ({with_region/total_internet*100:.1f}%)")
             col2.metric("Sin región", f"{without_region} ({without_region/total_internet*100:.1f}%)")
+            
+            # Mostrar ejemplos de medios Internet sin región
+            if without_region > 0:
+                st.write("**Ejemplos de medios Internet sin región:**")
+                no_region_internet = internet_df[internet_df['Región'].isna()][['Medio', 'Link Nota', 'Link (Streaming - Imagen)']].head(5)
+                st.dataframe(no_region_internet)
         
         # Estadísticas para TODOS los medios
         st.write("**Todos los medios:**")
@@ -517,12 +523,6 @@ def run_full_process(dossier_file, config_file):
             st.write("**Top 10 regiones detectadas:**")
             region_counts = df_final['Región'].value_counts().head(10)
             st.bar_chart(region_counts)
-            
-        # Mostrar algunos ejemplos de medios sin región para debugging
-        if without_region_all > 0:
-            st.write("**Ejemplos de medios sin región detectada:**")
-            no_region_df = df_final[df_final['Región'].isna()][['Medio', 'Tipo de Medio', 'Link (Streaming - Imagen)', 'Link Nota']].head(5)
-            st.dataframe(no_region_df)
     
     excel_data = to_excel_from_df(df_final, final_order)
     st.download_button(label="📥 Descargar Archivo Limpio y Mapeado", data=excel_data, file_name=f"Dossier_Limpio_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.openxmlformats-officedocument.sheet")

@@ -490,21 +490,39 @@ def run_full_process(dossier_file, config_file):
     
     # Mostrar estadísticas de detección de región
     with st.expander("📍 Ver estadísticas de detección de región"):
+        # Estadísticas para medios Internet
         internet_df = df_final[df_final['Tipo de Medio'] == 'Internet']
         if not internet_df.empty:
+            st.write("**Medios de Internet:**")
             total_internet = len(internet_df)
             with_region = internet_df['Región'].notna().sum()
             without_region = total_internet - with_region
             
             col1, col2 = st.columns(2)
-            col1.metric("Medios Internet con región detectada", f"{with_region} ({with_region/total_internet*100:.1f}%)")
-            col2.metric("Medios Internet sin región", f"{without_region} ({without_region/total_internet*100:.1f}%)")
+            col1.metric("Con región detectada", f"{with_region} ({with_region/total_internet*100:.1f}%)")
+            col2.metric("Sin región", f"{without_region} ({without_region/total_internet*100:.1f}%)")
+        
+        # Estadísticas para TODOS los medios
+        st.write("**Todos los medios:**")
+        total_all = len(df_final)
+        with_region_all = df_final['Región'].notna().sum()
+        without_region_all = total_all - with_region_all
+        
+        col3, col4 = st.columns(2)
+        col3.metric("Total con región", f"{with_region_all} ({with_region_all/total_all*100:.1f}%)")
+        col4.metric("Total sin región", f"{without_region_all} ({without_region_all/total_all*100:.1f}%)")
+        
+        # Mostrar distribución de regiones
+        if with_region_all > 0:
+            st.write("**Top 10 regiones detectadas:**")
+            region_counts = df_final['Región'].value_counts().head(10)
+            st.bar_chart(region_counts)
             
-            # Mostrar distribución de regiones
-            if with_region > 0:
-                st.write("**Distribución de regiones detectadas:**")
-                region_counts = internet_df['Región'].value_counts().head(10)
-                st.bar_chart(region_counts)
+        # Mostrar algunos ejemplos de medios sin región para debugging
+        if without_region_all > 0:
+            st.write("**Ejemplos de medios sin región detectada:**")
+            no_region_df = df_final[df_final['Región'].isna()][['Medio', 'Tipo de Medio', 'Link (Streaming - Imagen)', 'Link Nota']].head(5)
+            st.dataframe(no_region_df)
     
     excel_data = to_excel_from_df(df_final, final_order)
     st.download_button(label="📥 Descargar Archivo Limpio y Mapeado", data=excel_data, file_name=f"Dossier_Limpio_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.openxmlformats-officedocument.sheet")

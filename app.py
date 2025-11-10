@@ -6,10 +6,10 @@ import io
 import re
 import html
 import numpy as np
-from typing import Any, Dict
+from typing import Any
 
 # --- Configuración de la página ---
-st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.9", layout="wide")
+st.set_page_config(page_title="Procesador de Dossiers (Lite) v2.0", layout="wide")
 
 # --- Constantes ---
 FINAL_COLUMN_ORDER = [
@@ -56,31 +56,14 @@ def clean_summary_text(text: Any) -> Any:
     if text and not text.endswith('...'): text = text.rstrip('.') + '...'
     return text
 
-def extract_hyperlinks_map(dossier_file: io.BytesIO) -> Dict[str, str]:
-    """
-    Lee el archivo en modo estándar SOLO para extraer los hipervínculos.
-    Devuelve un diccionario mapeando coordenadas de celda a URLs.
-    """
-    wb = load_workbook(dossier_file, read_only=False) # Carga normal
-    sheet = wb.active
-    # En modo normal, sheet.hyperlinks SÍ existe
-    return {h.ref: h.target for h in sheet.hyperlinks}
-
 def read_and_expand_dossier(dossier_file: io.BytesIO) -> pd.DataFrame:
     """
-    Utiliza una estrategia híbrida para leer el archivo de manera eficiente:
-    1. Extrae los hipervínculos cargando el archivo en modo estándar.
-    2. Lee los datos de las celdas cargando el archivo en modo de solo lectura.
-    3. Combina ambos y expande las filas.
+    Lee el archivo en modo estándar (no read-only) para garantizar que los
+    hipervínculos se puedan leer directamente de cada celda. Este es el método
+    más robusto y compatible.
     """
-    # --- PASO 1: Extraer links con una lectura en modo estándar ---
-    hyperlink_map = extract_hyperlinks_map(dossier_file)
-
-    # --- PASO 2: Rebobinar el archivo en memoria para la segunda lectura ---
-    dossier_file.seek(0)
-
-    # --- PASO 3: Leer datos de celdas en modo eficiente (read-only) ---
-    wb = load_workbook(dossier_file, read_only=True, data_only=True)
+    # Cargar en modo estándar (read_only=False) y con data_only=True para obtener valores de celda
+    wb = load_workbook(dossier_file, read_only=False, data_only=True)
     sheet = wb.active
 
     headers = [cell.value for cell in sheet[1] if cell.value]
@@ -89,24 +72,25 @@ def read_and_expand_dossier(dossier_file: io.BytesIO) -> pd.DataFrame:
     link_streaming_idx = headers.index('Link (Streaming - Imagen)') if 'Link (Streaming - Imagen)' in headers else -1
     
     expanded_rows = []
-    for row in sheet.iter_rows(min_row=2):
-        if all(cell.value is None for cell in row): continue
+    # Iterar sobre las filas (a partir de la 2) usando el objeto sheet
+    for row_cells in sheet.iter_rows(min_row=2):
+        if all(cell.value is None for cell in row_cells): continue
 
-        row_values = [cell.value for cell in row]
-        row_data = dict(zip(headers, row_values))
+        row_data = {headers[i]: cell.value for i, cell in enumerate(row_cells) if i < len(headers)}
 
-        # --- PASO 4: Usar el mapa de links para poblar los datos ---
+        # --- LÓGICA DE EXTRACCIÓN DE LINKS DIRECTA Y ROBUSTA ---
+        # Acceder al atributo .hyperlink directamente de la celda.
         if link_nota_idx != -1:
-            cell_coord = row[link_nota_idx].coordinate
-            if cell_coord in hyperlink_map:
-                row_data['Link Nota'] = hyperlink_map[cell_coord]
+            cell = row_cells[link_nota_idx]
+            if cell.hyperlink:
+                row_data['Link Nota'] = cell.hyperlink.target
         
         if link_streaming_idx != -1:
-            cell_coord = row[link_streaming_idx].coordinate
-            if cell_coord in hyperlink_map:
-                row_data['Link (Streaming - Imagen)'] = hyperlink_map[cell_coord]
+            cell = row_cells[link_streaming_idx]
+            if cell.hyperlink:
+                row_data['Link (Streaming - Imagen)'] = cell.hyperlink.target
+        # --- FIN DE LA LÓGICA ROBUSTA ---
 
-        # --- PASO 5: Expandir filas como antes ---
         menciones_str = str(row_data.get('Menciones - Empresa') or '')
         menciones = [m.strip() for m in menciones_str.split(';') if m.strip()]
         
@@ -168,7 +152,7 @@ def run_full_process(dossier_file: io.BytesIO, config_file: io.BytesIO):
         st.stop()
     progress_bar.progress(20)
 
-    progress_text.info("Paso 2/5: Leyendo Dossier y extrayendo links (modo híbrido optimizado)...")
+    progress_text.info("Paso 2/5: Leyendo Dossier y extrayendo links (modo robusto)...")
     try:
         df = read_and_expand_dossier(dossier_file)
         df['Mantener'] = 'Conservar'
@@ -179,6 +163,7 @@ def run_full_process(dossier_file: io.BytesIO, config_file: io.BytesIO):
     progress_bar.progress(40)
 
     progress_text.info("Paso 3/5: Aplicando limpieza, mapeos y transformaciones...")
+    # (El resto de la lógica no necesita cambios)
     df['Título'] = df['Título'].apply(clean_title_for_output)
     df['Resumen - Aclaracion'] = df['Resumen - Aclaracion'].apply(clean_summary_text)
 
@@ -260,7 +245,7 @@ def run_full_process(dossier_file: io.BytesIO, config_file: io.BytesIO):
 # ==============================================================================
 # INTERFAZ PRINCIPAL DE STREAMLIT
 # ==============================================================================
-st.title("🚀 Procesador de Dossiers (Lite) v1.9")
+st.title("🚀 Procesador de Dossiers (Lite) v2.0")
 st.markdown("Herramienta para limpiar, mapear y deduplicar dossieres de noticias de forma rápida y eficiente.")
 
 st.info(
@@ -269,11 +254,17 @@ st.info(
     "2. Asegúrate de tener tu archivo `Configuracion.xlsx` con las hojas requeridas.\n"
     "3. Sube ambos archivos juntos en el área de abajo y haz clic en 'Iniciar Proceso'."
 )
-st.success("✅ **SOLUCIÓN DEFINITIVA (v1.9)**: Implementado un método híbrido que garantiza la extracción de todos los links de forma rápida y confiable, incluso en archivos muy grandes.")
+st.success("✅ **MÉTODO ROBUSTO (v2.0)**: Se utiliza el método de lectura más compatible para garantizar que todos los links se extraigan correctamente, priorizando la fiabilidad sobre la optimización extrema.")
 
 with st.expander("Ver estructura requerida para `Configuracion.xlsx`", expanded=False):
     st.markdown("""
-    ... (El contenido no cambia)
+    El archivo debe contener dos hojas de cálculo con los siguientes nombres y estructuras:
+    - **`Regiones`**:
+        - Columna A: Nombre del Medio (tal como aparece en el dossier).
+        - Columna B: Región a la que pertenece (ej. CABA, GBA, Córdoba, etc.).
+    - **`Internet`**:
+        - Columna A: Nombre del Medio de internet (ej. infobae.com).
+        - Columna B: Nombre Mapeado del Medio (ej. Infobae).
     """)
 
 uploaded_files = st.file_uploader(

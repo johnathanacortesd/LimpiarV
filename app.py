@@ -8,12 +8,13 @@ import html
 import numpy as np
 
 # --- Configuración de la página ---
-st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.6", layout="wide")
+st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.7", layout="wide")
 
 # ==============================================================================
 # SECCIÓN DE FUNCIONES AUXILIARES
 # ==============================================================================
 def extract_link_from_cell(cell):
+    """Extrae el hipervínculo de una celda si existe."""
     if cell.hyperlink and cell.hyperlink.target:
         return cell.hyperlink.target
     return None
@@ -23,68 +24,38 @@ def convert_html_entities(text):
     Convierte entidades HTML mal codificadas a caracteres normales.
     Maneja tanto entidades hexadecimales como decimales.
     """
-    if not isinstance(text, str): 
+    if not isinstance(text, str):
         return text
     
-    # Primero decodificar entidades HTML estándar
     text = html.unescape(text)
     
-    # Manejar entidades HTML numéricas hexadecimales específicas
     html_entities = {
-        '&#xF3;': 'ó',  # ó
-        '&#xE1;': 'á',  # á
-        '&#xE9;': 'é',  # é
-        '&#xED;': 'í',  # í
-        '&#xFA;': 'ú',  # ú
-        '&#xF1;': 'ñ',  # ñ
-        '&#xDC;': 'Ü',  # Ü
-        '&#xFC;': 'ü',  # ü
-        '&#xC1;': 'Á',  # Á
-        '&#xC9;': 'É',  # É
-        '&#xCD;': 'Í',  # Í
-        '&#xD3;': 'Ó',  # Ó
-        '&#xDA;': 'Ú',  # Ú
-        '&#xD1;': 'Ñ',  # Ñ
-        '&#xC7;': 'Ç',  # Ç
-        '&#xE7;': 'ç',  # ç
+        '&#xF3;': 'ó', '&#xE1;': 'á', '&#xE9;': 'é', '&#xED;': 'í', '&#xFA;': 'ú',
+        '&#xF1;': 'ñ', '&#xDC;': 'Ü', '&#xFC;': 'ü', '&#xC1;': 'Á', '&#xC9;': 'É',
+        '&#xCD;': 'Í', '&#xD3;': 'Ó', '&#xDA;': 'Ú', '&#xD1;': 'Ñ', '&#xC7;': 'Ç',
+        '&#xE7;': 'ç',
     }
     
-    # Reemplazar entidades HTML numéricas hexadecimales
     for entity, char in html_entities.items():
         text = text.replace(entity, char)
     
-    # Patrón para capturar otras entidades hexadecimales que no estén en el diccionario
     def replace_hex_entity(match):
         try:
-            hex_code = match.group(1)
-            char_code = int(hex_code, 16)
-            return chr(char_code)
+            return chr(int(match.group(1), 16))
         except (ValueError, OverflowError):
-            return match.group(0)  # Devolver original si no se puede convertir
+            return match.group(0)
     
     text = re.sub(r'&#x([0-9A-Fa-f]+);', replace_hex_entity, text)
     
-    # Patrón para entidades decimales
     def replace_decimal_entity(match):
         try:
-            decimal_code = int(match.group(1))
-            return chr(decimal_code)
+            return chr(int(match.group(1)))
         except (ValueError, OverflowError):
-            return match.group(0)  # Devolver original si no se puede convertir
+            return match.group(0)
     
     text = re.sub(r'&#(\d+);', replace_decimal_entity, text)
     
-    # Limpiar caracteres problemáticos adicionales
-    custom_replacements = {
-        '"': '"',
-        '"': '"', 
-        ''': "'", 
-        ''': "'", 
-        'Â': '', 
-        'â': '', 
-        '€': '', 
-        '™': ''
-    }
+    custom_replacements = {'"': '"', "''": "'", 'Â': '', 'â': '', '€': '', '™': ''}
     
     for entity, char in custom_replacements.items():
         text = text.replace(entity, char)
@@ -92,36 +63,21 @@ def convert_html_entities(text):
     return text
 
 def normalize_title_for_comparison(title):
-    """
-    Normaliza el título para comparación de duplicados.
-    """
+    """Normaliza el título para comparación de duplicados."""
     if not isinstance(title, str): 
         return ""
-    
-    # Limpiar entidades HTML primero
     title = convert_html_entities(title)
-    
-    # Normalizar para comparación (remover caracteres especiales y convertir a minúsculas)
     return re.sub(r'\W+', ' ', title).lower().strip()
 
 def clean_title_for_output(title):
-    """
-    ÚNICAMENTE limpia entidades HTML mal codificadas.
-    NO corta, NO modifica, NO remueve ninguna parte del título.
-    Solo convierte caracteres como &#xF3; a ó
-    """
+    """Limpia entidades HTML y espacios en los extremos del título."""
     if not isinstance(title, str): 
         return ""
-    
-    # SOLO limpiar entidades HTML - NO tocar nada más
     title = convert_html_entities(title)
-    
-    # Solo quitar espacios al inicio y final, NO espacios múltiples internos
-    title = title.strip()
-    
-    return title
+    return title.strip()
 
 def corregir_texto(text):
+    """Limpia y formatea el texto de resumen."""
     if not isinstance(text, str): return text
     text = convert_html_entities(text)
     text = re.sub(r'(<br>|\[\.\.\.\]|\s+)', ' ', text).strip()
@@ -130,27 +86,45 @@ def corregir_texto(text):
     if text and not text.endswith('...'): text = text.rstrip('.') + '...'
     return text
 
+# --- FUNCIÓN MODIFICADA ---
 def to_excel_from_df(df, final_order):
+    """
+    Convierte un DataFrame a un archivo Excel en memoria, creando hipervínculos
+    mediante fórmulas para evitar la limitación de 65k enlaces.
+    """
     output = io.BytesIO()
     final_columns_in_df = [col for col in final_order if col in df.columns]
-    df_to_excel = df[final_columns_in_df]
-    with pd.ExcelWriter(
-        output,
-        engine='xlsxwriter',
-        datetime_format='dd/mm/yyyy',
-        date_format='dd/mm/yyyy'
-    ) as writer:
+    df_to_excel = df[final_columns_in_df].copy() # Usar una copia para evitar SettingWithCopyWarning
+
+    # Columnas que contendrán los hipervínculos
+    link_columns = ['Link Nota', 'Link (Streaming - Imagen)']
+
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        # Escribir el DataFrame sin los datos de las columnas de enlaces
         df_to_excel.to_excel(writer, index=False, sheet_name='Resultado')
+        
         workbook = writer.book
         worksheet = writer.sheets['Resultado']
+        
+        # Formato para que la fórmula se vea como un hipervínculo estándar
         link_format = workbook.add_format({'color': 'blue', 'underline': 1})
-        for col_name in ['Link Nota', 'Link (Streaming - Imagen)']:
+        
+        # Iterar sobre las columnas que necesitan hipervínculos
+        for col_name in link_columns:
             if col_name in df_to_excel.columns:
                 col_idx = df_to_excel.columns.get_loc(col_name)
-                for row_idx, url in enumerate(df_to_excel[col_name]):
+                
+                # Escribir la cabecera manualmente
+                worksheet.write(0, col_idx, col_name)
+                
+                # Crear la fórmula HYPERLINK para cada fila
+                for row_idx, url in enumerate(df_to_excel[col_name], start=1):
                     if pd.notna(url) and isinstance(url, str) and url.startswith('http'):
-                        worksheet.write_url(row_idx + 1, col_idx, url, link_format, 'Link')
+                        # Fórmula: =HYPERLINK("url", "texto_amigable")
+                        worksheet.write_formula(row_idx, col_idx, f'=HYPERLINK("{url}", "Link")', link_format)
+    
     return output.getvalue()
+
 
 # ==============================================================================
 # LÓGICA DE PROCESAMIENTO PRINCIPAL
@@ -162,7 +136,7 @@ def run_full_process(dossier_file, config_file):
     
     progress_text.info("Paso 1/4: Cargando archivo de configuración...")
     try:
-        config_sheets = pd.read_excel(config_file.read(), sheet_name=None)
+        config_sheets = pd.read_excel(config_file, sheet_name=None)
         region_map = pd.Series(config_sheets['Regiones'].iloc[:, 1].values, index=config_sheets['Regiones'].iloc[:, 0].astype(str).str.lower().str.strip()).to_dict()
         internet_map = pd.Series(config_sheets['Internet'].iloc[:, 1].values, index=config_sheets['Internet'].iloc[:, 0].astype(str).str.lower().str.strip()).to_dict()
     except Exception as e:
@@ -174,14 +148,22 @@ def run_full_process(dossier_file, config_file):
     sheet = wb.active
     original_headers = [cell.value for cell in sheet[1] if cell.value]
     rows_to_expand = []
-    for row in sheet.iter_rows(min_row=2):
+    for row_num, row in enumerate(sheet.iter_rows(min_row=2), start=2):
         if all(c.value is None for c in row): continue
         row_values = [c.value for c in row]
         row_data = dict(zip(original_headers, row_values))
-        if 'Link Nota' in original_headers: row_data['Link Nota'] = extract_link_from_cell(row[original_headers.index('Link Nota')])
-        if 'Link (Streaming - Imagen)' in original_headers: row_data['Link (Streaming - Imagen)'] = extract_link_from_cell(row[original_headers.index('Link (Streaming - Imagen)')])
+
+        # Extracción de hipervínculos mejorada
+        if 'Link Nota' in original_headers:
+            cell = sheet.cell(row=row_num, column=original_headers.index('Link Nota') + 1)
+            row_data['Link Nota'] = extract_link_from_cell(cell) or row_data.get('Link Nota')
+        if 'Link (Streaming - Imagen)' in original_headers:
+            cell = sheet.cell(row=row_num, column=original_headers.index('Link (Streaming - Imagen)') + 1)
+            row_data['Link (Streaming - Imagen)'] = extract_link_from_cell(cell) or row_data.get('Link (Streaming - Imagen)')
+
         menciones = [m.strip() for m in str(row_data.get('Menciones - Empresa') or '').split(';') if m.strip()]
-        if not menciones: rows_to_expand.append(row_data)
+        if not menciones:
+            rows_to_expand.append(row_data)
         else:
             for mencion in menciones:
                 new_row = row_data.copy()
@@ -194,12 +176,12 @@ def run_full_process(dossier_file, config_file):
     for col in original_headers:
         if col not in df.columns: df[col] = None
     
-    # APLICAR LA LIMPIEZA CORREGIDA - SOLO ENTIDADES HTML, NO CORTAR
     df['Título'] = df['Título'].astype(str).apply(clean_title_for_output)
     df['Resumen - Aclaracion'] = df['Resumen - Aclaracion'].astype(str).apply(corregir_texto)
 
     tipo_medio_map = {'online': 'Internet', 'diario': 'Prensa', 'am': 'Radio', 'fm': 'Radio', 'aire': 'Televisión', 'cable': 'Televisión', 'revista': 'Revista'}
     df['Tipo de Medio'] = df['Tipo de Medio'].str.lower().str.strip().map(tipo_medio_map).fillna(df['Tipo de Medio'])
+    
     is_internet = df['Tipo de Medio'] == 'Internet'
     is_print = df['Tipo de Medio'].isin(['Prensa', 'Revista'])
     is_broadcast = df['Tipo de Medio'].isin(['Radio', 'Televisión'])
@@ -210,13 +192,9 @@ def run_full_process(dossier_file, config_file):
     df.loc[is_print, 'Link (Streaming - Imagen)'] = None
     df.loc[is_broadcast, 'Link (Streaming - Imagen)'] = None
     
-    # --- INICIO DE LA LÓGICA "CORTAR Y PEGAR" ---
     if 'Duración - Nro. Caracteres' in df.columns and 'Dimensión' in df.columns:
-        # 1. Copiar el valor a la columna Dimensión para medios broadcast
         df.loc[is_broadcast, 'Dimensión'] = df.loc[is_broadcast, 'Duración - Nro. Caracteres']
-        # 2. Limpiar (cortar) el valor de la columna original para esos mismos medios
         df.loc[is_broadcast, 'Duración - Nro. Caracteres'] = np.nan
-    # --- FIN DE LA LÓGICA "CORTAR Y PEGAR" ---
     
     df['Región'] = df['Medio'].astype(str).str.lower().str.strip().map(region_map)
     df.loc[is_internet, 'Medio'] = df.loc[is_internet, 'Medio'].astype(str).str.lower().str.strip().map(internet_map).fillna(df.loc[is_internet, 'Medio'])
@@ -266,7 +244,7 @@ def run_full_process(dossier_file, config_file):
     col3.metric("Filas Únicas", len(df_final) - dups_count)
     
     excel_data = to_excel_from_df(df_final, final_order)
-    st.download_button(label="📥 Descargar Archivo Limpio y Mapeado", data=excel_data, file_name=f"Dossier_Limpio_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.openxmlformats-officedocument.sheet")
+    st.download_button(label="📥 Descargar Archivo Limpio y Mapeado", data=excel_data, file_name=f"Dossier_Limpio_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     st.subheader("✍️ Previsualización de Resultados")
     final_columns_in_df = [col for col in final_order if col in df_final.columns]
@@ -281,11 +259,11 @@ def run_full_process(dossier_file, config_file):
 # ==============================================================================
 # INTERFAZ PRINCIPAL DE STREAMLIT
 # ==============================================================================
-st.title("🚀 Procesador de Dossiers (Lite) v1.6")
+st.title("🚀 Procesador de Dossiers (Lite) v1.7")
 st.markdown("Una herramienta para limpiar, deduplicar y mapear dossieres de noticias.")
 st.info("**Instrucciones:**\n\n1. Prepara tu archivo **Dossier** principal y tu archivo **`Configuracion.xlsx`**.\n2. Sube ambos archivos juntos en el área de abajo.\n3. Haz clic en 'Iniciar Proceso'.")
 
-# Información adicional sobre la mejora
+st.success("✅ **MEJORADO (v1.7)**: Se ha implementado un nuevo método para generar hipervínculos que evita el límite de ~65,000 enlaces por hoja.")
 st.success("✅ **MEJORADO**: Los títulos ahora se mantienen completos. Solo se limpian entidades HTML como &#xF3; → ó")
 
 with st.expander("Ver estructura requerida para `Configuracion.xlsx`"):
@@ -301,5 +279,6 @@ if uploaded_files:
     else: st.warning("No se ha subido un archivo que parezca ser el Dossier.")
     if config_file: st.success(f"Archivo de Configuración cargado: **{config_file.name}**")
     else: st.warning("No se ha subido el archivo `Configuracion.xlsx`.")
+
 if st.button("▶️ Iniciar Proceso de Limpieza", disabled=not (dossier_file and config_file), type="primary"):
     run_full_process(dossier_file, config_file)

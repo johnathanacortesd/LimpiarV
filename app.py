@@ -10,7 +10,7 @@ import html
 import numpy as np
 
 # --- Configuración de la página ---
-st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.6", layout="wide")
+st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.7", layout="wide")
 
 # ==============================================================================
 # SECCIÓN DE FUNCIONES AUXILIARES
@@ -191,6 +191,8 @@ def to_excel_from_df(df, final_order):
             ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = 50
         elif col_name in ['Link Nota', 'Link (Streaming - Imagen)']:
             ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = 15
+        elif col_name == 'Mantener':
+            ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = 25
         else:
             ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = 20
     
@@ -241,7 +243,7 @@ def run_full_process(dossier_file, config_file):
                 new_row['Menciones - Empresa'] = mencion
                 rows_to_expand.append(new_row)
     df = pd.DataFrame(rows_to_expand)
-    df['Mantener'] = 'Conservar'
+    df['Estado_Duplicado'] = 'Conservar'
 
     progress_text.info("Paso 3/4: Aplicando limpieza, mapeos y normalizaciones...")
     for col in original_headers:
@@ -282,15 +284,28 @@ def run_full_process(dossier_file, config_file):
     df['seccion_priority'] = df['Sección - Programa'].isnull() | (df['Sección - Programa'] == '')
     df['dup_hora'] = np.where(df['Tipo de Medio'] == 'Internet', 'IGNORE_TIME', df['Hora'])
 
+    # Crear columna Mantener inicialmente vacía
+    df['Mantener'] = ''
+
     dup_cols_exact = ['titulo_norm', 'Medio', 'Fecha', 'Menciones - Empresa', 'dup_hora']
     sort_by_cols = dup_cols_exact + ['seccion_priority']
     ascending_order = [True] * len(dup_cols_exact) + [False]
     df.sort_values(by=sort_by_cols, ascending=ascending_order, inplace=True)
-    exact_duplicates_mask = df.duplicated(subset=dup_cols_exact, keep='first')
-    df.loc[exact_duplicates_mask, 'Mantener'] = 'Eliminar'
+    
+    # Identificar duplicados exactos y guardar el ID de la noticia a mantener
+    for name, group in df.groupby(dup_cols_exact):
+        if len(group) > 1:
+            # El primero es el que se mantiene (tiene mejor sección)
+            id_to_keep = group.iloc[0]['ID Noticia']
+            # Los demás son duplicados
+            duplicate_indices = group.index[1:]
+            df.loc[duplicate_indices, 'Estado_Duplicado'] = 'Eliminar'
+            df.loc[duplicate_indices, 'Mantener'] = f'Duplicado de: {id_to_keep}'
+    
     df.sort_index(inplace=True)
 
-    df_internet_to_check = df[(df['Mantener'] == 'Conservar') & (is_internet)].copy()
+    # Procesar duplicados consecutivos de Internet
+    df_internet_to_check = df[(df['Estado_Duplicado'] == 'Conservar') & (is_internet)].copy()
     if not df_internet_to_check.empty:
         group_cols = ['titulo_norm', 'Medio', 'Menciones - Empresa']
         df_internet_to_check.sort_values(by=group_cols + ['Fecha'], inplace=True)
@@ -300,22 +315,28 @@ def run_full_process(dossier_file, config_file):
         sort_by_cols_consecutive = group_cols + ['date_cluster', 'seccion_priority']
         ascending_order_consecutive = [True] * (len(group_cols) + 1) + [False]
         df_internet_to_check.sort_values(by=sort_by_cols_consecutive, ascending=ascending_order_consecutive, inplace=True)
-        consecutive_duplicates_mask = df_internet_to_check.duplicated(subset=group_cols + ['date_cluster'], keep='first')
-        indices_to_eliminate = df_internet_to_check[consecutive_duplicates_mask].index
-        df.loc[indices_to_eliminate, 'Mantener'] = 'Eliminar'
+        
+        # Identificar duplicados consecutivos y guardar el ID de la noticia a mantener
+        for name, group in df_internet_to_check.groupby(group_cols + ['date_cluster']):
+            if len(group) > 1:
+                id_to_keep = group.iloc[0]['ID Noticia']
+                duplicate_indices = group.index[1:]
+                df.loc[duplicate_indices, 'Estado_Duplicado'] = 'Eliminar'
+                df.loc[duplicate_indices, 'Mantener'] = f'Duplicado de: {id_to_keep}'
 
-    df.loc[df['Mantener'] == 'Eliminar', ['Tono', 'Tema', 'Temas Generales - Tema']] = 'Duplicada'
+    # Marcar las columnas Tono, Tema, Temas Generales como Duplicada
+    df.loc[df['Estado_Duplicado'] == 'Eliminar', ['Tono', 'Tema', 'Temas Generales - Tema']] = 'Duplicada'
 
     st.balloons()
-    progress_text.success("¡Proceso de limpieza completado! Los títulos se mantienen completos y todos los hipervínculos se generan correctamente (sin límite de 64k).")
+    progress_text.success("¡Proceso de limpieza completado! Todas las duplicadas muestran el ID de la noticia a conservar.")
 
-    final_order = ["ID Noticia", "Fecha", "Hora", "Medio", "Tipo de Medio", "Sección - Programa", "Región", "Título", "Autor - Conductor", "Nro. Pagina", "Dimensión", "Duración - Nro. Caracteres", "CPE", "Tier", "Audiencia", "Tono", "Tema", "Temas Generales - Tema", "Resumen - Aclaracion", "Link Nota", "Link (Streaming - Imagen)", "Menciones - Empresa"]
+    final_order = ["ID Noticia", "Mantener", "Fecha", "Hora", "Medio", "Tipo de Medio", "Sección - Programa", "Región", "Título", "Autor - Conductor", "Nro. Pagina", "Dimensión", "Duración - Nro. Caracteres", "CPE", "Tier", "Audiencia", "Tono", "Tema", "Temas Generales - Tema", "Resumen - Aclaracion", "Link Nota", "Link (Streaming - Imagen)", "Menciones - Empresa"]
     df_final = df.copy()
 
     st.subheader("📊 Resumen del Proceso")
     col1, col2, col3 = st.columns(3)
     col1.metric("Filas Totales", len(df_final))
-    dups_count = (df_final['Mantener'] == 'Eliminar').sum()
+    dups_count = (df_final['Estado_Duplicado'] == 'Eliminar').sum()
     col2.metric("Filas Marcadas como Duplicadas", dups_count)
     col3.metric("Filas Únicas", len(df_final) - dups_count)
 
@@ -327,27 +348,18 @@ def run_full_process(dossier_file, config_file):
         mime="application/vnd.openxmlformats-officedocument.sheet"
     )
 
-    st.subheader("✍️ Previsualización de Resultados")
-    final_columns_in_df = [col for col in final_order if col in df_final.columns]
-    df_for_editor = df_final[final_columns_in_df].copy()
-    if 'Fecha' in df_for_editor.columns:
-        df_for_editor['Fecha'] = df_for_editor['Fecha'].dt.strftime('%d/%m/%Y').fillna('')
-    for col_name in ['Link Nota', 'Link (Streaming - Imagen)']:
-        if col_name in df_for_editor.columns:
-            df_for_editor[col_name] = df_for_editor[col_name].apply(lambda x: 'Link' if pd.notna(x) else '')
-    st.dataframe(df_for_editor, use_container_width=True)
-
 # ==============================================================================
 # INTERFAZ PRINCIPAL DE STREAMLIT
 # ==============================================================================
 
-st.title("🚀 Procesador de Dossiers (Lite) v1.6")
+st.title("🚀 Procesador de Dossiers (Lite) v1.7")
 st.markdown("Una herramienta para limpiar, deduplicar y mapear dossieres de noticias.")
-st.info("Instrucciones:\n\n1. Prepara tu archivo Dossier principal y tu archivo Configuracion.xlsx.\n2. Sube ambos archivos juntos en el área de abajo.\n3. Haz clic en 'Iniciar Proceso'.")
+st.info("**Instrucciones:**\n\n1. Prepara tu archivo Dossier principal y tu archivo Configuracion.xlsx.\n2. Sube ambos archivos juntos en el área de abajo.\n3. Haz clic en 'Iniciar Proceso'.\n4. La columna **Mantener** te indicará el ID de la noticia original cuando haya duplicados.")
 
-# Información adicional sobre la mejora
-st.success("✅ MEJORADO: Los títulos ahora se mantienen completos. Solo se limpian entidades HTML como ó → ó")
-st.success("✅ NUEVO: Sin límite de 64,000 hipervínculos. Ahora se usa openpyxl para generar enlaces sin restricciones.")
+# Información adicional sobre las mejoras
+st.success("✅ **Títulos completos**: Solo se limpian entidades HTML como ó → ó")
+st.success("✅ **Sin límite de 64,000 hipervínculos**: Ahora se usa openpyxl")
+st.success("✅ **Columna Mantener**: Muestra 'Duplicado de: [ID]' para identificar cuál conservar")
 
 with st.expander("Ver estructura requerida para Configuracion.xlsx"):
     st.markdown("- **Regiones**: Columna A (Medio), Columna B (Región).\n- **Internet**: Columna A (Medio Original), Columna B (Medio Mapeado).")

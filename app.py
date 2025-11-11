@@ -368,15 +368,12 @@ def run_full_process(dossier_file, config_file):
 # INTERFAZ PRINCIPAL DE STREAMLIT
 # ==============================================================================
 
-st.title("🚀 Procesador de Dossiers (Lite) v1.8")
+st.title("🚀 Procesador de SOV (Duplicadas) v1.8")
 st.markdown("Una herramienta para limpiar, deduplicar y mapear dossieres de noticias.")
 st.info("**Instrucciones:**\n\n1. Prepara tu archivo Dossier principal y tu archivo Configuracion.xlsx.\n2. Sube ambos archivos juntos en el área de abajo.\n3. Haz clic en 'Iniciar Proceso'.\n4. La columna **Mantener** te indicará el ID de la noticia original cuando haya duplicados.")
 
 # Información adicional sobre las mejoras
-st.success("✅ **Títulos completos**: Solo se limpian entidades HTML como ó → ó")
-st.success("✅ **Sin límite de 64,000 hipervínculos**: Ahora se usa openpyxl")
 st.success("✅ **Columna Mantener**: Muestra 'Duplicado de: [ID]' para identificar cuál conservar")
-st.success("✅ **Optimizado con PyArrow**: Procesamiento más rápido y eficiente")
 
 with st.expander("Ver estructura requerida para Configuracion.xlsx"):
     st.markdown("- **Regiones**: Columna A (Medio), Columna B (Región).\n- **Internet**: Columna A (Medio Original), Columna B (Medio Mapeado).")

@@ -8,9 +8,10 @@ import io
 import re
 import html
 import numpy as np
+import pyarrow as pa
 
 # --- Configuración de la página ---
-st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.7", layout="wide")
+st.set_page_config(page_title="Procesador de Dossiers (Lite) v1.8", layout="wide")
 
 # ==============================================================================
 # SECCIÓN DE FUNCIONES AUXILIARES
@@ -145,7 +146,12 @@ def to_excel_from_df(df, final_order):
     
     # Filtrar columnas que existen en el DataFrame
     final_columns_in_df = [col for col in final_order if col in df.columns]
-    df_to_excel = df[final_columns_in_df]
+    df_to_excel = df[final_columns_in_df].copy()
+    
+    # Convertir columnas de PyArrow string a object para compatibilidad con openpyxl
+    for col in df_to_excel.columns:
+        if hasattr(df_to_excel[col].dtype, 'pyarrow_dtype'):
+            df_to_excel[col] = df_to_excel[col].astype(object)
     
     # Crear workbook con openpyxl
     wb = Workbook()
@@ -213,7 +219,7 @@ def run_full_process(dossier_file, config_file):
 
     progress_text.info("Paso 1/4: Cargando archivo de configuración...")
     try:
-        config_sheets = pd.read_excel(config_file.read(), sheet_name=None)
+        config_sheets = pd.read_excel(config_file.read(), sheet_name=None, engine='openpyxl')
         region_map = pd.Series(config_sheets['Regiones'].iloc[:, 1].values, index=config_sheets['Regiones'].iloc[:, 0].astype(str).str.lower().str.strip()).to_dict()
         internet_map = pd.Series(config_sheets['Internet'].iloc[:, 1].values, index=config_sheets['Internet'].iloc[:, 0].astype(str).str.lower().str.strip()).to_dict()
     except Exception as e:
@@ -246,6 +252,15 @@ def run_full_process(dossier_file, config_file):
     df['Estado_Duplicado'] = 'Conservar'
 
     progress_text.info("Paso 3/4: Aplicando limpieza, mapeos y normalizaciones...")
+    
+    # Optimización PyArrow: Convertir columnas de texto a string[pyarrow]
+    string_columns = ['Título', 'Resumen - Aclaracion', 'Medio', 'Tipo de Medio', 
+                      'Menciones - Empresa', 'Sección - Programa', 'Autor - Conductor',
+                      'Región', 'Tema', 'Temas Generales - Tema', 'Tono']
+    for col in string_columns:
+        if col in df.columns:
+            df[col] = df[col].astype('string[pyarrow]')
+    
     for col in original_headers:
         if col not in df.columns: 
             df[col] = None
@@ -330,7 +345,8 @@ def run_full_process(dossier_file, config_file):
     st.balloons()
     progress_text.success("¡Proceso de limpieza completado! Todas las duplicadas muestran el ID de la noticia a conservar.")
 
-    final_order = ["ID Noticia", "Mantener", "Fecha", "Hora", "Medio", "Tipo de Medio", "Sección - Programa", "Región", "Título", "Autor - Conductor", "Nro. Pagina", "Dimensión", "Duración - Nro. Caracteres", "CPE", "Tier", "Audiencia", "Tono", "Tema", "Temas Generales - Tema", "Resumen - Aclaracion", "Link Nota", "Link (Streaming - Imagen)", "Menciones - Empresa"]
+    # COLUMNA MANTENER AL FINAL
+    final_order = ["ID Noticia", "Fecha", "Hora", "Medio", "Tipo de Medio", "Sección - Programa", "Región", "Título", "Autor - Conductor", "Nro. Pagina", "Dimensión", "Duración - Nro. Caracteres", "CPE", "Tier", "Audiencia", "Tono", "Tema", "Temas Generales - Tema", "Resumen - Aclaracion", "Link Nota", "Link (Streaming - Imagen)", "Menciones - Empresa", "Mantener"]
     df_final = df.copy()
 
     st.subheader("📊 Resumen del Proceso")
@@ -352,7 +368,7 @@ def run_full_process(dossier_file, config_file):
 # INTERFAZ PRINCIPAL DE STREAMLIT
 # ==============================================================================
 
-st.title("🚀 Procesador de Dossiers (Lite) v1.7")
+st.title("🚀 Procesador de Dossiers (Lite) v1.8")
 st.markdown("Una herramienta para limpiar, deduplicar y mapear dossieres de noticias.")
 st.info("**Instrucciones:**\n\n1. Prepara tu archivo Dossier principal y tu archivo Configuracion.xlsx.\n2. Sube ambos archivos juntos en el área de abajo.\n3. Haz clic en 'Iniciar Proceso'.\n4. La columna **Mantener** te indicará el ID de la noticia original cuando haya duplicados.")
 
@@ -360,6 +376,7 @@ st.info("**Instrucciones:**\n\n1. Prepara tu archivo Dossier principal y tu arch
 st.success("✅ **Títulos completos**: Solo se limpian entidades HTML como ó → ó")
 st.success("✅ **Sin límite de 64,000 hipervínculos**: Ahora se usa openpyxl")
 st.success("✅ **Columna Mantener**: Muestra 'Duplicado de: [ID]' para identificar cuál conservar")
+st.success("✅ **Optimizado con PyArrow**: Procesamiento más rápido y eficiente")
 
 with st.expander("Ver estructura requerida para Configuracion.xlsx"):
     st.markdown("- **Regiones**: Columna A (Medio), Columna B (Región).\n- **Internet**: Columna A (Medio Original), Columna B (Medio Mapeado).")

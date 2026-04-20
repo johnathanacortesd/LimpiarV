@@ -21,6 +21,8 @@
 ![pandas](https://img.shields.io/badge/pandas-2.x-150458?style=for-the-badge&logo=pandas&logoColor=white)
 ![Estado](https://img.shields.io/badge/Estado-Activo-4CAF50?style=for-the-badge)
 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://duplicas-limpiar-v.streamlit.app/)
+
 <br/>
 
 > Procesador de SOV es la versión **Lite** del flujo de limpieza de dossiers. Sin modelos de IA, sin dependencias pesadas — solo pandas, openpyxl y lógica de negocio sólida. Detecta duplicados exactos y consecutivos, expande menciones, mapea medios y regiones, y entrega un `.xlsx` listo para análisis de Share of Voice en segundos.

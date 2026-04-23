@@ -219,7 +219,7 @@ def run_full_process(dossier_file, config_file):
 
     progress_text.info("Paso 1/4: Cargando archivo de configuración...")
     try:
-        config_sheets = pd.read_excel(config_file.read(), sheet_name=None, engine='openpyxl')
+        config_sheets = pd.read_excel(config_file, sheet_name=None, engine='openpyxl')
         region_map = pd.Series(config_sheets['Regiones'].iloc[:, 1].values, index=config_sheets['Regiones'].iloc[:, 0].astype(str).str.lower().str.strip()).to_dict()
         internet_map = pd.Series(config_sheets['Internet'].iloc[:, 1].values, index=config_sheets['Internet'].iloc[:, 0].astype(str).str.lower().str.strip()).to_dict()
     except Exception as e:

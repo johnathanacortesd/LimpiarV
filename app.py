@@ -272,7 +272,7 @@ def run_full_process(dossier_file, config_file):
     tipo_medio_map = {'online': 'Internet', 'diario': 'Prensa', 'am': 'Radio', 'fm': 'Radio', 'aire': 'Televisión', 'cable': 'Televisión', 'revista': 'Revista'}
     df['Tipo de Medio'] = df['Tipo de Medio'].str.lower().str.strip().map(tipo_medio_map).fillna(df['Tipo de Medio'])
     is_internet = df['Tipo de Medio'] == 'Internet'
-    is_print = df['Tipo de Medio'].isin(['Prensa', 'Revista'])
+    is_print = df['Tipo de Medio'].isin(['Prensa', 'Revistas'])
     is_broadcast = df['Tipo de Medio'].isin(['Radio', 'Televisión'])
 
     df.loc[is_internet, ['Link Nota', 'Link (Streaming - Imagen)']] = df.loc[is_internet, ['Link (Streaming - Imagen)', 'Link Nota']].values
